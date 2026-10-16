@@ -1,0 +1,86 @@
+{
+  "name": "model-shelf",
+  "version": "1.0.0",
+  "description": "ספריית מודלים להדפסת תלת-ממד (STL / 3MF) עם יומן הדפסות מ-Bambu Lab",
+  "main": "app/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "app:prepare": "node build.mjs && node -e \"require('fs').copyFileSync('dist/shelf.html','app/renderer/index.html')\"",
+    "start": "npm run app:prepare && electron .",
+    "dist": "npm run app:prepare && electron-builder",
+    "dist:mac": "npm run app:prepare && electron-builder --mac",
+    "dist:win": "npm run app:prepare && electron-builder --win"
+  },
+  "author": "Gil Sheps",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "fflate": "^0.8.2",
+    "three": "^0.169.0"
+  },
+  "productName": "Model Shelf",
+  "private": true,
+  "build": {
+    "appId": "com.gilsheps.modelshelf",
+    "productName": "Model Shelf",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "identity": "-",
+      "artifactName": "ModelShelf-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "Model Shelf ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "ModelShelf-${version}-windows-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "shortcutName": "Model Shelf"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "artifactName": "ModelShelf-${version}-linux.${ext}"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gilsheps/model-shelf.git"
+  }
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+app/renderer/index.html
+fixtures/out/
+fixtures/real/
+test/shots/
+helper/test_*.py
+*.log
+.DS_Store
+__pycache__/
