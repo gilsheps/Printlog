@@ -20,14 +20,21 @@ jobs:
             target: --win
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run app:prepare
-      - run: npx electron-builder ${{ matrix.target }} --publish never
+      - name: Package
+        shell: bash
+        run: |
+          set -o pipefail
+          npx electron-builder ${{ matrix.target }} --publish never 2>&1 | tee build.log || {
+            tail -n 40 build.log | sed 's/%/%25/g' | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
