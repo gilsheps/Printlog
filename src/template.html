@@ -149,6 +149,7 @@ main{overflow:auto;position:relative}
 .tag button{border:0;background:transparent;padding:0;line-height:1;color:inherit;opacity:.6;font-size:14px}
 .tag button:hover{opacity:1}
 .sdot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.sdot.cancel{background:var(--ink3)}
 .sdot.ok{background:var(--ok)}.sdot.fail{background:var(--fail)}.sdot.partial{background:var(--part)}.sdot.never{background:var(--line2)}
 
 .empty{padding:70px 20px;text-align:center;color:var(--ink3)}
@@ -213,12 +214,14 @@ textarea.notes:focus,.inp:focus{border-color:var(--accent);background:var(--pane
 .print-item .meta{color:var(--ink2);font-size:12.5px;margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 12px}
 .print-item .pn{margin-top:6px;font-size:13px;white-space:pre-wrap}
 .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:20px}
+.pill.cancel{background:var(--panel2);color:var(--ink3);border:1px solid var(--line)}
 .pill.ok{background:var(--ok-soft);color:var(--ok)}.pill.fail{background:var(--fail-soft);color:var(--fail)}.pill.partial{background:var(--part-soft);color:var(--part)}
 .seg{display:flex;border:1px solid var(--line2);border-radius:10px;overflow:hidden}
 .seg button{flex:1;border:0;background:var(--panel2);padding:7px 6px;font-weight:500;color:var(--ink2)}
 .seg button+button{border-inline-start:1px solid var(--line2)}
 .seg button.on[data-v="ok"]{background:var(--ok-soft);color:var(--ok)}
 .seg button.on[data-v="partial"]{background:var(--part-soft);color:var(--part)}
+.seg button.on[data-v="cancel"]{background:var(--panel);color:var(--ink)}
 .seg button.on[data-v="fail"]{background:var(--fail-soft);color:var(--fail)}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .form-grid .full{grid-column:1/-1}

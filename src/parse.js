@@ -138,6 +138,11 @@ function parseModelXml(xml) {
 }
 
 function decodeEntities(s) {
+  let prev;
+  do { prev = s; s = decodeOnce(s); } while (s !== prev && /&(amp|lt|gt|quot|apos|#\d+);/.test(s));
+  return s;
+}
+function decodeOnce(s) {
   return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d)).replace(/&amp;/g, '&');
 }
 

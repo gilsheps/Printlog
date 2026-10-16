@@ -18,7 +18,8 @@ const API = {
   tasks: 'https://api.bambulab.com/v1/user-service/my/tasks',
   preference: 'https://api.bambulab.com/v1/design-user-service/my/preference',
 };
-const TASK_STATUS = { 1: 'running', 2: 'ok', 3: 'fail', 4: 'cancel' };
+// matches Bambu Studio's Print History: 2 = Success, 3 = Canceled
+const TASK_STATUS = { 0: 'running', 1: 'running', 2: 'ok', 3: 'cancel', 4: 'fail' };
 const OUT_NAME = 'printer-sync.json';
 
 const nowIso = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -328,7 +329,17 @@ function discover(ms = 8000) {
 /* ---------------------------------------------------------------- engine */
 class Engine {
   constructor({ getConfig, saveConfig, notify, onWrite, log }) {
-    Object.assign(this, { getConfig, saveConfig, notify, onWrite, log: log || console.log });
+    Object.assign(this, { getConfig, saveConfig, notify, onWrite });
+    const base = log || console.log;
+    // also keep a small log next to the library data, to make problems easy to diagnose
+    this.log = (m) => {
+      base(m);
+      if (!this.logFile) return;
+      try {
+        fs.appendFileSync(this.logFile, `[${new Date().toISOString()}] ${m}\n`);
+        if (fs.statSync(this.logFile).size > 300000) { const t = fs.readFileSync(this.logFile, 'utf8'); fs.writeFileSync(this.logFile, t.slice(-150000)); }
+      } catch { }
+    };
     this.clients = [];
     this.timer = null;
     this.pendingLogin = null;
@@ -346,19 +357,30 @@ class Engine {
     const cfg = this.getConfig();
     if (!cfg.library || !cfg.mode || cfg.mode === 'off') return;
     const out = (this.out = new Output(cfg.library, cfg.mode, this.onWrite));
+    this.logFile = path.join(cfg.library, '.shelf', 'sync.log');
+    try { fs.mkdirSync(path.dirname(this.logFile), { recursive: true }); } catch { }
+    this.log(`engine start: mode=${cfg.mode} printers=${(cfg.printers || []).map((p) => `${p.name}[${p.ip ? 'ip' : '-'}${p.access_code ? '+code' : ''}]`).join(' ')} cloud=${cfg.cloud?.token ? 'yes' : 'no'}`);
     out.setHelper({ lastError: '', needsLogin: false, stopped: null });
     const printers = cfg.printers || [];
     const onPrint = (e) => { if (cfg.options?.notify !== false) this.notify(e); };
-    if (cfg.mode === 'lan' || cfg.mode === 'both') {
-      for (const p of printers) {
-        if (!p.ip || !p.access_code) continue;
+    // live status: straight from the printer on the LAN when we have its IP + access code,
+    // otherwise through Bambu Cloud (like the Home Assistant integration)
+    const viaCloud = [];
+    for (const p of printers) {
+      const lanOk = (cfg.mode === 'lan' || cfg.mode === 'both') && p.ip && p.access_code;
+      if (lanOk) {
         const w = { [p.serial]: new LiveWatcher(out, p.serial, p.name || p.serial, 'lan', onPrint) };
+        this.log(`live: ${p.name} via LAN ${p.ip}`);
         this.clients.push(startMqtt({ host: p.ip, user: 'bblp', password: p.access_code, serials: [p.serial], watchers: w, insecure: true, label: `${p.name} (LAN)`, out, log: this.log }));
-      }
-    } else if (cfg.mode === 'cloud' && cfg.cloud?.token && printers.length) {
-      const ws = Object.fromEntries(printers.map((p) => [p.serial, new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
-      this.clients.push(startMqtt({ host: cfg.cloud.region === 'china' ? 'cn.mqtt.bambulab.com' : 'us.mqtt.bambulab.com', user: cfg.cloud.user, password: cfg.cloud.token, serials: Object.keys(ws), watchers: ws, insecure: false, label: 'Bambu Cloud', out, log: this.log }));
+      } else if (cfg.mode !== 'lan') viaCloud.push(p);
+      else { this.log(`live: ${p.name} skipped - no IP / access code`); out.setPrinter(p.serial, { name: p.name, conn: 'error', error: 'חסרים IP או Access Code' }, false); }
     }
+    if (viaCloud.length && cfg.cloud?.token && cfg.cloud?.user) {
+      const ws = Object.fromEntries(viaCloud.map((p) => [p.serial, new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
+      this.log(`live: ${viaCloud.map((p) => p.name).join(', ')} via Bambu Cloud`);
+      for (const p of viaCloud) out.setPrinter(p.serial, { name: p.name, conn: 'connecting' }, false);
+      this.clients.push(startMqtt({ host: cfg.cloud.region === 'china' ? 'cn.mqtt.bambulab.com' : 'us.mqtt.bambulab.com', user: cfg.cloud.user, password: cfg.cloud.token, serials: Object.keys(ws), watchers: ws, insecure: false, label: 'Bambu Cloud', out, log: this.log }));
+    } else if (viaCloud.length) this.log('live: cloud printers but no cloud token - sign in again');
     this.flushT = setInterval(() => out.flush(), 5000);
     if (cfg.mode === 'cloud' || cfg.mode === 'both') this.loopHistory(true);
   }
@@ -369,7 +391,7 @@ class Engine {
     let next = Math.max(2, cfg.options?.intervalMin || 10) * 60000;
     try {
       const n = await this.syncHistory(first);
-      if (n) this.log(`cloud history: ${n} new`);
+      this.log(`cloud history: ${n} new`);
     } catch (e) {
       this.log(`cloud sync failed: ${e.message}`);
       if (this.out) this.out.setHelper({ lastError: e.message, needsLogin: e instanceof AuthExpired });

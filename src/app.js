@@ -45,13 +45,13 @@ const fmtBytes = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Ma
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
 const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה' };
+const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה', cancel: 'בוטלה' };
 // build plates of the model's current file (each plate = a separate print)
 function platesOf(m) { return (lib.data.files[(m.versions.find((v) => v.path === m.current) || m.versions[m.versions.length - 1]).path]?.meta?.plates) || []; }
 function plateStatus(m) {
   const res = {};
   for (const p of [...m.prints].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.at || '').localeCompare(b.at || ''))) {
-    if (!p.plateNo) continue;
+    if (!p.plateNo || p.result === 'cancel') continue;
     const cur = res[p.plateNo];
     res[p.plateNo] = cur === 'ok' && p.result !== 'ok' ? 'ok' : p.result; // a plate stays "done" once it printed fine
   }
@@ -91,7 +91,9 @@ const M = {
   rec: (path) => lib.data.files[path] || {},
   status(m) {
     if (!m.prints.length) return 'never';
-    const last = [...m.prints].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || '').localeCompare(a.at || ''))[0];
+    const real = m.prints.filter((p) => p.result !== 'cancel');
+    if (!real.length) return 'cancel';
+    const last = [...real].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || '').localeCompare(a.at || ''))[0];
     return last.result;
   },
   lastPrint: (m) => m.prints.reduce((a, p) => (p.date > a ? p.date : a), ''),
@@ -518,11 +520,11 @@ function pickModel(entry) {
 }
 
 function autoNames() {
-  for (const m of M.list()) {
-    if (!m.nameAuto) continue;
-    const t = M.rec(M.cur(m).path).meta?.title;
-    if (t && t !== m.name) m.name = t;
-  }
+  // names come from the file name (MakerWorld design titles are shared by many files)
+  if ((lib.data.namesVer || 1) >= 2) return;
+  for (const m of M.list()) if (m.nameAuto) m.name = prettyName(baseName(m.versions[0].path));
+  lib.data.namesVer = 2;
+  lib.save();
 }
 
 /* ================= thumbnails ================= */
@@ -813,8 +815,7 @@ function cardHTML({ m, plate }) {
     : pst && Object.keys(pst).length ? `${okPlates}/${plates.length} פלטות הודפסו · ${fmtDate(M.lastPrint(m))}`
     : `${RESULT[st]} · ${fmtDate(M.lastPrint(m))}${m.prints.length > 1 ? ` · ${m.prints.length} הדפסות` : ''}`;
   return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}">
-    <div class="thumbwrap"><div class="thumb" data-thumb="${esc(v.path)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div>
-    <div class="quick"><button data-q="ok" title="רשום: הודפס היום בהצלחה">${I.check}הודפס</button><button data-q="fail" title="רשום: הדפסה נכשלה היום">${I.close}נכשל</button></div></div>
+    <div class="thumbwrap"><div class="thumb" data-thumb="${esc(v.path)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
     <div class="badges"><span class="badge">${kind === 'stl' ? 'STL' : '3MF'}</span>${kind === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}${m.versions.length > 1 ? `<span class="badge accent">${m.versions.length} גרסאות</span>` : ''}</div>
     <div class="check" data-check>${I.check}</div>
     ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
@@ -837,8 +838,7 @@ function plateCardHTML(m, plate) {
   const key = v.path + '#' + plate.id;
   const url = lib.thumbURLs.get(key);
   return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}" data-plate="${plate.id}">
-    <div class="thumbwrap"><div class="thumb" data-pthumb="${esc(key)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div>
-    <div class="quick"><button data-q="ok" title="רשום: פלטה ${plate.id} הודפסה היום בהצלחה">${I.check}הודפס</button><button data-q="fail" title="רשום: פלטה ${plate.id} נכשלה היום">${I.close}נכשל</button></div></div>
+    <div class="thumbwrap"><div class="thumb" data-pthumb="${esc(key)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
     <div class="badges"><span class="badge accent">פלטה ${plate.id}/${plates.length}</span>${fileKind(v.path) === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}</div>
     <div class="check" data-check>${I.check}</div>
     ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
@@ -910,8 +910,6 @@ function onGridClick(e) {
   const card = e.target.closest('.card');
   if (!card) return;
   const id = card.dataset.id;
-  const q = e.target.closest('[data-q]');
-  if (q) { quickLog(lib.data.models[id], q.dataset.q, card.dataset.plate ? +card.dataset.plate : 0); return; }
   if (e.target.closest('[data-check]') || e.metaKey || e.ctrlKey || e.shiftKey || S.selected.size) {
     if (e.shiftKey && S.lastSel && S.visible) {
       const a = S.visible.indexOf(S.lastSel), b = S.visible.indexOf(id);
@@ -1217,7 +1215,7 @@ function printFormHTML(m) {
   const verOpts = m.versions.map((v, i) => `<option value="${esc(v.path)}" ${v.path === f.versionPath ? 'selected' : ''}>v${i + 1} · ${esc(baseName(v.path))}</option>`).join('');
   const lastOk = [...m.prints].filter((p) => p.result === 'ok').sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
   return `<div class="print-form" id="pform">
-    <div class="field"><label>תוצאה</label><div class="seg" id="pres">${['ok', 'partial', 'fail'].map((r) => `<button data-v="${r}" class="${f.result === r ? 'on' : ''}">${RESULT[r]}</button>`).join('')}</div></div>
+    <div class="field"><label>תוצאה</label><div class="seg" id="pres">${['ok', 'partial', 'fail', 'cancel'].map((r) => `<button data-v="${r}" class="${f.result === r ? 'on' : ''}">${RESULT[r]}</button>`).join('')}</div></div>
     <div class="form-grid">
       <div><label>תאריך</label><input class="inp" type="date" name="date" value="${esc(f.date)}"></div>
       ${m.versions.length > 1 ? `<div><label>גרסה</label><select class="inp" name="versionPath">${verOpts}</select></div>` : platesOf(m).length > 1 ? '' : '<div></div>'}

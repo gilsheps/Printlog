@@ -62,7 +62,7 @@ API = {
     "preference": "https://api.bambulab.com/v1/design-user-service/my/preference",
 }
 # Cloud task status codes, as returned by /my/tasks
-TASK_STATUS = {1: "running", 2: "ok", 3: "fail", 4: "cancel"}
+TASK_STATUS = {0: "running", 1: "running", 2: "ok", 3: "cancel", 4: "fail"}  # as in Bambu Studio Print History
 
 
 # ----------------------------------------------------------------- utils

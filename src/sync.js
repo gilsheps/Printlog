@@ -25,35 +25,74 @@ export async function readSyncFile(lib) {
   }
 }
 
+// Bambu "titles" that are really print-profile names ("0.2mm layer, 2 walls, 15% infill")
+const GENERIC = /(\d+(\.\d+)?\s*mm\s*(layer|层高))|\bwalls?\b|\binfill\b|填充|层墙|^standard settings$|^v\s*\d+(\.\d+)*\s*$|^plate\s*\d+$|^untitled$/i;
+const isGeneric = (t) => !t || GENERIC.test(String(t).trim());
+const baseKey = (path) => norm(baseName(path).replace(/\(\d+\)(?=\.[^.]+$|\.gcode\.3mf$)/i, ''));
+
 function buildIndex(lib) {
-  const idx = new Map();
-  const add = (k, id) => {
+  const mk = () => new Map();
+  const idx = { file: mk(), user: mk(), design: mk() };
+  const add = (map, k, id) => {
     const n = norm(k);
-    if (n.length < 2) return;
-    if (!idx.has(n)) idx.set(n, new Set());
-    idx.get(n).add(id);
+    if (!n || n.length < 2) return;
+    if (!map.has(n)) map.set(n, new Set());
+    map.get(n).add(id);
   };
   for (const m of Object.values(lib.data.models)) {
-    add(m.name, m.id);
-    for (const a of m.aliases || []) add(a, m.id);
+    if (!m.nameAuto) add(idx.user, norm(m.name), m.id);
+    for (const a of m.aliases || []) add(idx.user, norm(a), m.id);
     for (const v of m.versions) {
-      add(baseName(v.path), m.id);
+      add(idx.file, norm(baseName(v.path)), m.id);
+      add(idx.file, baseKey(v.path), m.id);
       const t = lib.data.files[v.path]?.meta?.title;
-      if (t) add(t, m.id);
+      if (t) add(idx.design, norm(t), m.id);
     }
   }
   return idx;
 }
 
+function tokens(s) { return new Set(String(s || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3)); }
+
+// choose among several candidate models: name overlap with the print title, then file time
+function pickBest(lib, ids, entry) {
+  if (ids.length === 1) return lib.data.models[ids[0]];
+  const tt = tokens(entry.title);
+  const t = Date.parse(entry.start || '') || Date.now();
+  let best = null, bestScore = -1, bestD = Infinity;
+  for (const id of ids) {
+    const m = lib.data.models[id];
+    let score = 0, d = Infinity;
+    for (const v of m.versions) {
+      const ft = tokens(baseName(v.path).replace(/\.(gcode\.3mf|3mf|stl)$/i, ''));
+      let s = 0;
+      for (const w of tt) if (ft.has(w)) s++;
+      score = Math.max(score, s);
+      const mt = lib.data.files[v.path]?.mtime || 0;
+      if (t - mt >= 0) d = Math.min(d, t - mt);
+    }
+    if (score > bestScore || (score === bestScore && d < bestD)) { best = m; bestScore = score; bestD = d; }
+  }
+  return best;
+}
+
 export function matchModel(lib, entry, idx = buildIndex(lib)) {
-  const cands = [entry.title, entry.file && baseName(entry.file), entry.design].filter(Boolean).map(norm).filter((n) => n.length >= 2);
-  let ids = null;
-  for (const c of cands) if (idx.has(c)) { ids = [...idx.get(c)]; break; }
+  const title = isGeneric(entry.title) ? '' : entry.title;
+  const fileT = entry.file ? baseName(entry.file) : '';
+  const names = [title, fileT].filter(Boolean).map(norm).filter((n) => n.length >= 2);
+  const look = (map, keys) => { for (const k of keys) if (map.has(k)) return [...map.get(k)]; return null; };
+  // 1. the print's name is a file in the library (e.g. "Enderman" -> Enderman.3mf)
+  let ids = look(idx.file, names);
+  // 2. a name the user gave the model, or a print title they assigned before
+  if (!ids) ids = look(idx.user, [...names, norm(entry.title)].filter(Boolean));
+  // 3. the MakerWorld design title stored in the 3MF
+  if (!ids && entry.design) ids = look(idx.design, [norm(entry.design)]);
+  if (!ids && !title && entry.design) ids = look(idx.file, [norm(entry.design)]);
+  // 4. fuzzy: one file name contains the other
   if (!ids) {
-    // fuzzy: one name contains the other (long enough to be meaningful)
     let best = null, bestLen = 0;
-    for (const c of cands.filter((c) => c.length >= 5)) {
-      for (const [k, set] of idx) {
+    for (const c of names.filter((c) => c.length >= 5)) {
+      for (const [k, set] of idx.file) {
         if (k.length < 5) continue;
         if (c.includes(k) || k.includes(c)) {
           const l = Math.min(k.length, c.length);
@@ -64,20 +103,11 @@ export function matchModel(lib, entry, idx = buildIndex(lib)) {
     ids = best;
   }
   if (!ids || !ids.length) return null;
-  if (ids.length === 1) return lib.data.models[ids[0]];
-  // several models share the name - prefer the one whose file existed closest before the print
-  const t = Date.parse(entry.start || '') || Date.now();
-  let pick = ids[0], bestD = Infinity;
-  for (const id of ids) {
-    const m = lib.data.models[id];
-    for (const v of m.versions) {
-      const mt = lib.data.files[v.path]?.mtime || 0;
-      const d = t - mt;
-      if (d >= 0 && d < bestD) { bestD = d; pick = id; }
-    }
-  }
-  return lib.data.models[pick];
+  return pickBest(lib, ids, entry);
 }
+
+export const STATUS = { 2: 'ok', 3: 'cancel', 4: 'fail' };
+export const entryResult = (e) => (e.source === 'cloud' && e.rawStatus != null ? STATUS[e.rawStatus] || 'unknown' : e.result);
 
 const BED = { textured_plate: 'Textured PEI Plate', cool_plate: 'Cool Plate', eng_plate: 'Engineering Plate', hot_plate: 'High Temp Plate', pei_plate: 'PEI Plate', supertack_plate: 'SuperTack Plate' };
 
@@ -89,10 +119,10 @@ function localDate(iso) {
 
 export function entryToPrint(lib, m, e) {
   const fil = e.filaments || [];
-  const result = e.result === 'ok' ? 'ok' : e.result === 'unknown' ? 'partial' : 'fail';
+  const r = entryResult(e);
+  const result = r === 'ok' || r === 'cancel' || r === 'fail' ? r : 'partial';
   const notes = [];
-  if (e.result === 'cancel') notes.push('ההדפסה בוטלה');
-  if (e.result === 'unknown') notes.push(`סטטוס לא ידוע מהענן (${e.rawStatus})`);
+  if (r === 'unknown') notes.push(`סטטוס לא ידוע מהענן (${e.rawStatus})`);
   if (e.error) notes.push(`קוד שגיאה מהמדפסת: ${e.error}`);
   // which version was current at print time
   const t = Date.parse(e.start || '') || Date.now();
@@ -125,6 +155,20 @@ export function importPrints(lib, sync) {
   D.imported = D.imported || {};
   const res = { added: 0, updated: 0, unmatched: [] };
   if (!sync || !Array.isArray(sync.prints)) return res;
+  // v2 matching: redo automatic matches made by the old rules (keep what the user assigned by hand)
+  if ((D.importVer || 1) < 2) {
+    for (const m of Object.values(D.models)) {
+      const al = new Set((m.aliases || []).map(norm));
+      m.prints = m.prints.filter((p) => {
+        if (!p.key || !/^(cloud|live)-/.test(p.key)) return true;
+        const e = sync.prints.find((x) => x.key === p.key || (x.aliasKeys || []).includes(p.key));
+        return e && (al.has(norm(e.title)) || al.has(norm(e.design)));
+      });
+    }
+    for (const k of Object.keys(D.imported)) if (D.imported[k] !== 'ignored') { const m = D.models[D.imported[k]]; if (!m || !m.prints.some((p) => p.key === k)) delete D.imported[k]; }
+    D.importVer = 2;
+    res.updated++;
+  }
   const idx = buildIndex(lib);
   const findPrint = (key) => {
     const mid = D.imported[key];
