@@ -5,7 +5,7 @@
   "main": "app/main.js",
   "scripts": {
     "build": "node build.mjs",
-    "app:prepare": "node build.mjs && node -e \"require('fs').copyFileSync('dist/shelf.html','app/renderer/index.html')\"",
+    "app:prepare": "node build.mjs && node -e \"const fs=require('fs');fs.mkdirSync('app/renderer',{recursive:true});fs.copyFileSync('dist/shelf.html','app/renderer/index.html')\"",
     "start": "npm run app:prepare && electron .",
     "dist": "npm run app:prepare && electron-builder",
     "dist:mac": "npm run app:prepare && electron-builder --mac",
