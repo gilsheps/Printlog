@@ -544,12 +544,14 @@ async function makeThumb(path) {
     if (!wrote) {
       if (file.size > 250e6) throw new Error('קובץ גדול מדי לתמונה ממוזערת');
       const parsed = parseModel(path, buf);
-      const { blob, dims } = await renderThumbnail(parsed.parts);
+      const pl = parsed.meta.plates && parsed.meta.plates[0];
+      const { blob, dims } = await renderThumbnail(pl ? parsed.parts.filter((p) => p.plate === pl.id) : parsed.parts);
       rec.dims = dims;
       rec.triangles = parsed.meta.triangles || parsed.parts.reduce((a, p) => a + p.positions.length / 9, 0);
       await lib.writeThumb(path, blob);
     }
     rec.metaKey = key;
+    rec.tv = 2;
     rec.failed = null;
     rec.error = null;
     rec.stale = false;
@@ -911,6 +913,7 @@ function openModal(id) {
       <div class="overlay" id="ov"><div class="spin"></div></div>
       <div class="dims hidden" id="dims"></div>
       <div class="nav"><button class="btn icon-btn" id="close" title="סגור (Esc)">${I.close}</button><button class="btn icon-btn" data-step="-1" title="הקודם">${I.prev}</button><button class="btn icon-btn" data-step="1" title="הבא">${I.next}</button></div>
+      <div class="plates hidden" id="plates"></div>
       <div class="tools"><button class="btn small" id="wire" title="רשת">${I.wire}רשת</button><button class="btn small" id="reset" title="מרכז">${I.target}מרכז</button></div>
     </div>
     <div class="info" id="info"></div>
@@ -970,14 +973,24 @@ async function loadView(path) {
     await sleep(10);
     const parsed = parseModel(path, buf);
     if (tok !== loadToken || !viewer) return;
-    const dims = viewer.show(parsed.parts);
+    const plates = parsed.meta.plates || [];
+    const showPlate = (id) => {
+      const parts = id ? parsed.parts.filter((p) => p.plate === id) : parsed.parts;
+      const dims = viewer.show(parts);
+      const tri = parts.reduce((a, p) => a + p.positions.length / 9, 0);
+      $('#dims').classList.remove('hidden');
+      $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(tri).toLocaleString('he-IL')} משולשים`;
+      const pe = $('#plates');
+      pe.classList.toggle('hidden', plates.length < 2);
+      pe.innerHTML = plates.map((p) => `<button class="btn small ${p.id === id ? 'on' : ''}" data-plate="${p.id}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}</button>`).join('') + `<button class="btn small ${!id ? 'on' : ''}" data-plate="0">הכל</button>`;
+      pe.onclick = (e) => { const b = e.target.closest('[data-plate]'); if (b) showPlate(+b.dataset.plate); };
+      return dims;
+    };
+    const dims = showPlate(plates.length > 1 ? plates[0].id : 0);
     ov.classList.add('hidden');
-    const tri = parsed.meta.triangles || parsed.parts.reduce((a, p) => a + p.positions.length / 9, 0);
     rec.dims = dims;
-    rec.triangles = tri;
+    rec.triangles = parsed.meta.triangles || parsed.parts.reduce((a, p) => a + p.positions.length / 9, 0);
     lib.save();
-    $('#dims').classList.remove('hidden');
-    $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(tri).toLocaleString('he-IL')} משולשים`;
     if (S.tab === 'details') renderInfo();
   } catch (e) {
     if (tok !== loadToken) return;

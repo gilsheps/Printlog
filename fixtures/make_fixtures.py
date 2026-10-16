@@ -106,6 +106,21 @@ def simple_3mf(path):
         z.writestr("3D/3dmodel.model", xml)
 
 
+def multi_plate_3mf(path):
+    objs, items, plates = [], [], []
+    for i in range(4):
+        v, f = box(30 + i * 5, 30, 10 + i * 8)
+        objs.append('<object id="%d" type="model">%s</object>' % (i + 1, mesh_xml(v, f)))
+        # Bambu lays plates out side by side (plate pitch ~ 307 mm)
+        items.append('<item objectid="%d" transform="1 0 0 0 1 0 0 0 1 %d %d 0"/>' % (i + 1, 110 + (i % 2) * 307, 110 - (i // 2) * 307))
+        plates.append('<plate><metadata key="plater_id" value="%d"/><metadata key="plater_name" value="%s"/><model_instance><metadata key="object_id" value="%d"/><metadata key="instance_id" value="0"/></model_instance></plate>' % (i + 1, "" if i else "Base", i + 1))
+    xml = ('<?xml version="1.0"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+           '<resources>%s</resources><build>%s</build></model>' % ("".join(objs), "".join(items)))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("3D/3dmodel.model", xml)
+        z.writestr("Metadata/model_settings.config", '<?xml version="1.0"?><config>%s</config>' % "".join(plates))
+
+
 os.makedirs(os.path.join(OUT, "כלים"), exist_ok=True)
 os.makedirs(os.path.join(OUT, "Toys"), exist_ok=True)
 write_binary_stl(os.path.join(OUT, "Toys", "donut.stl"), torus())
@@ -115,4 +130,5 @@ write_ascii_stl(os.path.join(OUT, "כלים", "קופסה.stl"), v, f)
 bambu_3mf(os.path.join(OUT, "phone_stand.3mf"))
 bambu_3mf(os.path.join(OUT, "phone_stand_nothumb.gcode.3mf"), with_thumb=False)
 simple_3mf(os.path.join(OUT, "כלים", "cube.3mf"))
+multi_plate_3mf(os.path.join(OUT, "four_plates.3mf"))
 print("ok", OUT)

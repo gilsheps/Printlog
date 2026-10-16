@@ -229,6 +229,6 @@ export class Library {
     if (!r || r.missing) return false;
     const key = this.thumbKey(path);
     if (r.failed === key) return false;
-    return !r.thumb || r.thumbKey !== key || r.metaKey !== key;
+    return !r.thumb || r.thumbKey !== key || r.metaKey !== key || r.tv !== 2;
   }
 }

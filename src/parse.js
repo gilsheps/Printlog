@@ -141,6 +141,25 @@ function decodeEntities(s) {
   return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d)).replace(/&amp;/g, '&');
 }
 
+// Bambu/Orca: which build-plate each object sits on
+function parsePlates(xml) {
+  const plates = [];
+  if (!xml) return plates;
+  const reP = /<plate>([\s\S]*?)<\/plate>/g;
+  let m;
+  while ((m = reP.exec(xml))) {
+    const b = m[1];
+    const id = /key="plater_id"\s+value="(\d+)"/.exec(b);
+    const name = /key="plater_name"\s+value="([^"]*)"/.exec(b);
+    const objs = new Set();
+    const reI = /<model_instance>([\s\S]*?)<\/model_instance>/g;
+    let i;
+    while ((i = reI.exec(b))) { const o = /key="object_id"\s+value="(\d+)"/.exec(i[1]); if (o) objs.add(o[1]); }
+    if (id) plates.push({ id: +id[1], name: name ? decodeEntities(name[1]) : '', objects: objs });
+  }
+  return plates.sort((a, b) => a.id - b.id);
+}
+
 function parseModelSettings(xml) {
   // object id -> { extruder, parts: {partId: extruder}, name }
   const res = new Map();
@@ -282,10 +301,15 @@ export function parse3MF(buffer) {
   const fcolors = meta.filamentColors || [];
   const colorFor = (ext) => (ext > 0 && fcolors[ext - 1] ? fcolors[ext - 1] : null);
 
-  const buckets = new Map(); // color -> number[]
+  const plates = parsePlates(settingsXml);
+  const plateOf = new Map();
+  for (const pl of plates) for (const o of pl.objects) plateOf.set(o, pl.id);
+  let curPlate = 0;
+  const buckets = new Map(); // plate|color -> number[]
   const push = (color, arr) => {
-    let b = buckets.get(color);
-    if (!b) { b = []; buckets.set(color, b); }
+    const k = curPlate + '|' + color;
+    let b = buckets.get(k);
+    if (!b) { b = []; buckets.set(k, b); }
     for (let i = 0; i < arr.length; i++) b.push(arr[i]);
   };
   const v = new Vector3();
@@ -327,9 +351,12 @@ export function parse3MF(buffer) {
   const items = root.items.length ? root.items : [...root.objects.values()].filter((o) => o.type !== 'support').map((o) => ({ objectid: o.id, path: null, transform: new Matrix4() }));
   for (const it of items) {
     const s = objSettings.get(it.objectid);
+    curPlate = plateOf.get(it.objectid) || 0;
     visit(it.objectid, it.path || rootPath, it.transform.clone(), 0, s ? s.extruder : 0, s);
   }
-  const parts = [...buckets.entries()].map(([color, arr]) => ({ color, positions: new Float32Array(arr) }));
+  const parts = [...buckets.entries()].map(([k, arr]) => { const i = k.indexOf('|'); return { plate: +k.slice(0, i), color: k.slice(i + 1), positions: new Float32Array(arr) }; });
+  const used = [...new Set(parts.map((p) => p.plate))].filter(Boolean).sort((a, b) => a - b);
+  meta.plates = used.length > 1 ? used.map((id) => ({ id, name: (plates.find((p) => p.id === id) || {}).name || '' })) : [];
   if (!parts.length) throw new Error('הקובץ לא מכיל גיאומטריה');
   if (!meta.title && root.metadata.Title) meta.title = root.metadata.Title;
   meta.triangles = triCount;
