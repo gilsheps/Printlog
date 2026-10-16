@@ -94,7 +94,6 @@ export function entryToPrint(lib, m, e) {
   if (e.result === 'cancel') notes.push('ההדפסה בוטלה');
   if (e.result === 'unknown') notes.push(`סטטוס לא ידוע מהענן (${e.rawStatus})`);
   if (e.error) notes.push(`קוד שגיאה מהמדפסת: ${e.error}`);
-  if (e.plate) notes.push(`פלטה ${e.plate}${e.plateName ? ` (${e.plateName})` : ''} בפרויקט`);
   // which version was current at print time
   const t = Date.parse(e.start || '') || Date.now();
   let versionPath = m.current || m.versions[m.versions.length - 1].path;
@@ -112,6 +111,7 @@ export function entryToPrint(lib, m, e) {
     plate: BED[e.bed] || e.bed || '',
     minutes: e.minutes || '', grams: e.grams || (fil.reduce((a, f) => a + (f.grams || 0), 0) || ''),
     printer: e.printer || '',
+    plateNo: e.plate || '',
     notes: notes.join(' · '),
   };
 }

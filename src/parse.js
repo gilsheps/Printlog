@@ -230,6 +230,7 @@ export function summarizeSettings(settings, slice) {
     bed: bed || '',
     filaments,
     timeSec: plate ? plate.prediction : 0,
+    byPlate: slice ? Object.fromEntries(slice.filter((p) => p.index).map((p) => [p.index, { timeSec: p.prediction, grams: p.weight }])) : {},
     grams: plate ? plate.weight : filaments.reduce((a, f) => a + f.grams, 0),
   };
 }
@@ -240,7 +241,7 @@ export function read3MFMeta(buffer) {
   let files;
   try {
     files = unzipSync(u8, {
-      filter: (f) => /^Metadata\/(plate_\d+\.png|thumbnail\.png|project_settings\.config|slice_info\.config|Slic3r_PE\.config)$/i.test(f.name)
+      filter: (f) => /^Metadata\/(plate_\d+\.png|thumbnail\.png|project_settings\.config|slice_info\.config|model_settings\.config|Slic3r_PE\.config)$/i.test(f.name)
         || /^Auxiliaries\/\.thumbnails\/thumbnail_(3mf|middle)\.png$/i.test(f.name)
         || (f.name === '3D/3dmodel.model' && f.originalSize < 4e6),
     });
@@ -254,6 +255,13 @@ function extractMeta(files) {
     || Object.keys(files).find((n) => /thumbnail_3mf\.png$/i.test(n))
     || Object.keys(files).find((n) => /thumbnail(_middle)?\.png$/i.test(n));
   if (thumbName) meta.thumbPng = files[thumbName];
+  // build plates (each plate is its own print)
+  let plates = files['Metadata/model_settings.config'] ? parsePlates(strFromU8(files['Metadata/model_settings.config'])).filter((p) => p.objects.size).map((p) => ({ id: p.id, name: p.name })) : [];
+  if (plates.length < 2) {
+    const ids = Object.keys(files).map((n) => /^Metadata\/plate_(\d+)\.png$/i.exec(n)).filter(Boolean).map((x) => +x[1]).sort((a, b) => a - b);
+    plates = ids.length > 1 ? ids.map((id) => ({ id, name: '' })) : [];
+  }
+  meta.plates = plates.length > 1 ? plates : [];
   let settings = null;
   if (files['Metadata/project_settings.config']) {
     try { settings = JSON.parse(strFromU8(files['Metadata/project_settings.config'])); } catch { }

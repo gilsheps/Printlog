@@ -6,7 +6,7 @@ const SHOTS = path.join(__dirname, 'shots');
 const lib = fs.mkdtempSync(path.join(os.tmpdir(), 'madaf-lib-'));
 cp.execSync(`cp -r ${path.join(__dirname, '../fixtures/out')}/. ${lib}/`);
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'madaf-home-'));
-const userData = path.join(home, '.config', 'HaMadaf');
+const userData = path.join(home, '.config', 'Model Shelf');
 fs.mkdirSync(userData, { recursive: true });
 fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({ library: lib, mode: 'lan', printers: [{ serial: 'SER1', name: 'P2S', model: 'P2S', ip: '127.0.0.1', access_code: '12345678' }], options: { notify: true } }));
 

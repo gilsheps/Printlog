@@ -4,6 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const { Engine, discover } = require('./engine');
 
+// Keep this name stable: settings (incl. the Bambu sign-in) live in a folder named after it,
+// so updates and reinstalls keep them.
 app.setName('Model Shelf');
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
@@ -108,6 +110,22 @@ ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
 ipcMain.handle('sync:discover', () => discover());
 ipcMain.handle('sync:now', () => engine.loopHistory(false));
+
+/* ---------------- updates: compare with the latest GitHub Release ---------------- */
+const RELEASES = 'https://api.github.com/repos/gilsheps/model-shelf/releases/latest';
+const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+ipcMain.handle('app:checkUpdate', async () => {
+  try {
+    const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'model-shelf' }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return { current: app.getVersion(), error: r.status === 404 ? 'private' : `HTTP ${r.status}` };
+    const j = await r.json();
+    const latest = String(j.tag_name || '').replace(/^v/, '');
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const asset = (j.assets || []).find((a) => process.platform === 'darwin' ? a.name.endsWith(`mac-${arch}.dmg`) : process.platform === 'win32' ? a.name.endsWith('.exe') : false);
+    return { current: app.getVersion(), latest, update: !!latest && newer(latest, app.getVersion()), url: (asset && asset.browser_download_url) || j.html_url, page: j.html_url, notes: (j.body || '').slice(0, 1500) };
+  } catch (e) { return { current: app.getVersion(), error: e.message }; }
+});
+ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 
 /* ---------------- window, tray, notifications */
 function iconPath(name) { return path.join(__dirname, 'assets', name); }

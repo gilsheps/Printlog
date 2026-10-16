@@ -46,6 +46,17 @@ const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL'
 const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה' };
+// build plates of the model's current file (each plate = a separate print)
+function platesOf(m) { return (lib.data.files[(m.versions.find((v) => v.path === m.current) || m.versions[m.versions.length - 1]).path]?.meta?.plates) || []; }
+function plateStatus(m) {
+  const res = {};
+  for (const p of [...m.prints].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.at || '').localeCompare(b.at || ''))) {
+    if (!p.plateNo) continue;
+    const cur = res[p.plateNo];
+    res[p.plateNo] = cur === 'ok' && p.result !== 'ok' ? 'ok' : p.result; // a plate stays "done" once it printed fine
+  }
+  return res;
+}
 
 function toast(msg, err) {
   const t = document.createElement('div');
@@ -148,7 +159,11 @@ async function openLibrary(dir) {
   S.bound = true;
   window.addEventListener('focus', () => { if (Date.now() - S.lastScan > 8000) rescan(false); });
   setInterval(() => { if (!document.hidden) syncPrints(false); }, 20000);
-  if (native) native.onSync(() => syncPrints(false));
+  if (native) {
+    native.onSync(() => syncPrints(false));
+    setTimeout(() => checkUpdate(false), 8000);
+    setInterval(() => checkUpdate(false), 12 * 3600 * 1000);
+  }
 }
 
 async function rescan(first) {
@@ -295,6 +310,24 @@ function printerDialog() {
   document.body.appendChild(box);
 }
 
+/* ---------- desktop app: updates ---------- */
+async function checkUpdate(manual) {
+  if (!native || !native.checkUpdate) return;
+  const r = await native.checkUpdate();
+  if (r.update) {
+    if (!manual && S.updateShown === r.latest) return;
+    S.updateShown = r.latest;
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.innerHTML = `גרסה חדשה זמינה: ${esc(r.latest)} (יש לך ${esc(r.current)}) <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">הורד</button><div style="font-size:12px;opacity:.75;margin-top:4px">ההגדרות, החיבור ל-Bambu והספרייה נשמרים בהתקנה.</div>`;
+    $('button', t).onclick = () => { native.openUrl(r.url); t.remove(); };
+    $('#toasts').appendChild(t);
+    setTimeout(() => t.remove(), 30000);
+  } else if (manual) {
+    toast(r.error === 'private' ? 'אי אפשר לבדוק עדכונים כל עוד ה-repo פרטי' : r.error ? 'בדיקת העדכונים נכשלה' : `יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
+  }
+}
+
 /* ---------- desktop app: settings ---------- */
 async function nativeSettings() {
   let st = await native.sync.getState();
@@ -342,7 +375,7 @@ async function nativeSettings() {
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
-    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span></div>
+    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
   </div>`;
   };
   const collect = () => {
@@ -406,6 +439,7 @@ async function nativeSettings() {
       if (info) location.reload();
       return;
     }
+    if (t.closest('[data-checkupd]')) { checkUpdate(true); return; }
     if (t.closest('[data-save]')) { await save(); box.remove(); }
   });
   draw();
@@ -534,7 +568,7 @@ async function makeThumb(path) {
     if (kind !== 'stl') {
       const meta = read3MFMeta(buf);
       if (meta && !meta.error) {
-        rec.meta = { title: meta.title || '', designer: meta.designer || '', description: meta.description || '', license: meta.license || '', print: meta.print || null };
+        rec.meta = { title: meta.title || '', designer: meta.designer || '', description: meta.description || '', license: meta.license || '', print: meta.print || null, plates: meta.plates || [] };
         if (meta.thumbPng && meta.thumbPng.length > 200) {
           await lib.writeThumb(path, new Blob([meta.thumbPng], { type: 'image/png' }));
           wrote = true;
@@ -760,7 +794,12 @@ function cardHTML(m) {
   const kind = fileKind(v.path);
   const st = M.status(m);
   const url = lib.thumbURLs.get(v.path);
-  const stLabel = st === 'never' ? 'אין הדפסה רשומה' : `${RESULT[st]} · ${fmtDate(M.lastPrint(m))}${m.prints.length > 1 ? ` · ${m.prints.length} הדפסות` : ''}`;
+  const plates = platesOf(m);
+  const pst = plates.length > 1 ? plateStatus(m) : null;
+  const okPlates = pst ? plates.filter((p) => pst[p.id] === 'ok').length : 0;
+  const stLabel = st === 'never' ? (plates.length > 1 ? `${plates.length} פלטות · אין הדפסה רשומה` : 'אין הדפסה רשומה')
+    : pst && Object.keys(pst).length ? `${okPlates}/${plates.length} פלטות הודפסו · ${fmtDate(M.lastPrint(m))}`
+    : `${RESULT[st]} · ${fmtDate(M.lastPrint(m))}${m.prints.length > 1 ? ` · ${m.prints.length} הדפסות` : ''}`;
   return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}">
     <div class="thumbwrap"><div class="thumb" data-thumb="${esc(v.path)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div>
     <div class="quick"><button data-q="ok" title="רשום: הודפס היום בהצלחה">${I.check}הודפס</button><button data-q="fail" title="רשום: הדפסה נכשלה היום">${I.close}נכשל</button></div></div>
@@ -793,13 +832,16 @@ function renderGrid() {
 
 function quickLog(m, result) {
   const vp = M.cur(m).path;
-  const p = { id: uid(), at: new Date().toISOString(), date: todayISO(), result, versionPath: vp, ...defaultsFor(m, vp) };
+  const plates = platesOf(m);
+  const pst = plateStatus(m);
+  const plateNo = plates.length > 1 ? (plates.find((x) => pst[x.id] !== 'ok') || plates[0]).id : '';
+  const p = { id: uid(), at: new Date().toISOString(), date: todayISO(), result, versionPath: vp, plateNo, ...defaultsFor(m, vp, plateNo) };
   m.prints.push(p);
   M.touch(m);
   renderAll();
   const t = document.createElement('div');
   t.className = 'toast';
-  t.innerHTML = `${result === 'ok' ? 'נרשמה הדפסה מוצלחת' : 'נרשמה הדפסה שנכשלה'}: ${esc(m.name)} <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">ביטול</button>`;
+  t.innerHTML = `${result === 'ok' ? 'נרשמה הדפסה מוצלחת' : 'נרשמה הדפסה שנכשלה'}: ${esc(m.name)}${plateNo ? ` · פלטה ${plateNo}` : ''} <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">ביטול</button>`;
   $('button', t).onclick = () => { m.prints = m.prints.filter((x) => x.id !== p.id); M.touch(m); renderAll(); t.remove(); };
   $('#toasts').appendChild(t);
   setTimeout(() => t.remove(), 6000);
@@ -982,7 +1024,10 @@ async function loadView(path) {
       $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(tri).toLocaleString('he-IL')} משולשים`;
       const pe = $('#plates');
       pe.classList.toggle('hidden', plates.length < 2);
-      pe.innerHTML = plates.map((p) => `<button class="btn small ${p.id === id ? 'on' : ''}" data-plate="${p.id}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}</button>`).join('') + `<button class="btn small ${!id ? 'on' : ''}" data-plate="0">הכל</button>`;
+      S.viewPlate = id || null;
+      const om = lib.data.models[S.open];
+      const ps = om ? plateStatus(om) : {};
+      pe.innerHTML = plates.map((p) => `<button class="btn small ${p.id === id ? 'on' : ''}" data-plate="${p.id}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}${ps[p.id] === 'ok' ? ' ✓' : ps[p.id] === 'fail' ? ' ✗' : ''}</button>`).join('') + `<button class="btn small ${!id ? 'on' : ''}" data-plate="0">הכל</button>`;
       pe.onclick = (e) => { const b = e.target.closest('[data-plate]'); if (b) showPlate(+b.dataset.plate); };
       return dims;
     };
@@ -1069,11 +1114,15 @@ function detailsTab(m) {
 function printsTab(m) {
   const list = [...m.prints].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || '').localeCompare(a.at || ''));
   const verName = (p) => { const i = m.versions.findIndex((v) => v.path === p); return i >= 0 ? `v${i + 1}` : ''; };
+  const plates = platesOf(m);
+  const pst = plateStatus(m);
+  const sym = { ok: '✓', partial: '◐', fail: '✗' };
   return `
+    ${plates.length > 1 ? `<div class="plate-sum">${plates.map((p) => `<span class="pchip ${pst[p.id] || 'none'}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''} <b>${sym[pst[p.id]] || '–'}</b></span>`).join('')}</div>` : ''}
     ${S.printForm ? printFormHTML(m) : `<button class="btn primary" id="newprint" style="margin-bottom:14px">${I.plus}רשום הדפסה</button>`}
     ${list.length ? list.map((p) => `
       <div class="print-item">
-        <div class="ph"><span class="pill ${p.result}">${RESULT[p.result]}</span><span class="when">${fmtDate(p.date)}</span>${m.versions.length > 1 && p.versionPath ? `<span class="badge">${verName(p.versionPath)}</span>` : ''}${p.source ? `<span class="badge" title="${esc(p.printer || '')}">${p.source === 'cloud' ? 'מהענן' : 'מהמדפסת'}</span>` : ''}
+        <div class="ph"><span class="pill ${p.result}">${RESULT[p.result]}</span><span class="when">${fmtDate(p.date)}</span>${p.plateNo ? `<span class="badge accent">פלטה ${esc(p.plateNo)}</span>` : ''}${m.versions.length > 1 && p.versionPath ? `<span class="badge">${verName(p.versionPath)}</span>` : ''}${p.source ? `<span class="badge" title="${esc(p.printer || '')}">${p.source === 'cloud' ? 'מהענן' : 'מהמדפסת'}</span>` : ''}
           <span class="x"><button class="btn small ghost" data-editprint="${p.id}">ערוך</button><button class="btn small ghost danger" data-delprint="${p.id}">מחק</button></span></div>
         <div class="meta">
           ${p.material ? `<span>${p.color ? `<span class="swatch" style="background:${esc(p.color)}"></span> ` : ''}${esc(p.material)}</span>` : ''}
@@ -1085,10 +1134,12 @@ function printsTab(m) {
       </div>`).join('') : (S.printForm ? '' : '<div class="hint">עוד לא נרשמו הדפסות. אחרי כל הדפסה רושמים אם הצליחה, ובפעם הבאה יודעים בדיוק עם אילו הגדרות זה עבד.</div>')}`;
 }
 
-function defaultsFor(m, path) {
+function defaultsFor(m, path, plateNo) {
   const p = M.rec(path).meta?.print;
   if (!p) return {};
   const f = (p.filaments && p.filaments[0]) || {};
+  const bp = plateNo && p.byPlate && p.byPlate[plateNo];
+  if (bp) return { ...defaultsFor(m, path), minutes: bp.timeSec ? Math.round(bp.timeSec / 60) : '', grams: bp.grams ? +bp.grams.toFixed(1) : '' };
   return {
     material: [...new Set((p.filaments || []).map((x) => x.type).filter(Boolean))].join(' + '),
     color: f.color || '',
@@ -1105,7 +1156,8 @@ function printFormHTML(m) {
     <div class="field"><label>תוצאה</label><div class="seg" id="pres">${['ok', 'partial', 'fail'].map((r) => `<button data-v="${r}" class="${f.result === r ? 'on' : ''}">${RESULT[r]}</button>`).join('')}</div></div>
     <div class="form-grid">
       <div><label>תאריך</label><input class="inp" type="date" name="date" value="${esc(f.date)}"></div>
-      ${m.versions.length > 1 ? `<div><label>גרסה</label><select class="inp" name="versionPath">${verOpts}</select></div>` : '<div></div>'}
+      ${m.versions.length > 1 ? `<div><label>גרסה</label><select class="inp" name="versionPath">${verOpts}</select></div>` : platesOf(m).length > 1 ? '' : '<div></div>'}
+      ${platesOf(m).length > 1 ? `<div><label>פלטה</label><select class="inp" name="plateNo">${platesOf(m).map((p) => `<option value="${p.id}" ${+f.plateNo === p.id ? 'selected' : ''}>פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}</option>`).join('')}</select></div>${m.versions.length > 1 ? '<div></div>' : ''}` : ''}
       <div><label>חומר</label><input class="inp" name="material" value="${esc(f.material || '')}" placeholder="PLA, PETG…"></div>
       <div><label>צבע</label><div style="display:flex;gap:6px"><input type="color" name="color" value="${esc(f.color || '#888888')}" style="width:42px;height:36px;border:1px solid var(--line2);border-radius:8px;background:var(--panel2);padding:2px"><input class="inp" name="colorName" value="${esc(f.colorName || '')}" placeholder="שם הצבע"></div></div>
       <div><label>גובה שכבה (mm)</label><input class="inp ltr" name="layer" value="${esc(f.layer || '')}"></div>
@@ -1216,6 +1268,8 @@ function bindInfo(m) {
   for (const inp of $$('[data-vnote]', info)) inp.oninput = () => { const v = m.versions.find((x) => x.path === inp.dataset.vnote); v.note = inp.value; M.touch(m); };
   const addver = $('#addver');
   if (addver) addver.onchange = () => { const f = addver.files[0]; if (f) addVersion(m, f); };
+  const psel = $('#pform [name=plateNo]');
+  if (psel) psel.onchange = () => { collectForm(); const d = defaultsFor(m, S.printForm.versionPath, +psel.value); S.printForm.minutes = d.minutes ?? S.printForm.minutes; S.printForm.grams = d.grams ?? S.printForm.grams; renderInfo(); };
   const vsel = $('#pform [name=versionPath]');
   if (vsel) vsel.onchange = () => { collectForm(); renderInfo(); };
   for (const p of $$('[data-thumb]', info)) refreshThumb(p.dataset.thumb);
@@ -1223,7 +1277,10 @@ function bindInfo(m) {
 
 function startPrintForm(m) {
   const vp = S.viewPath || M.cur(m).path;
-  S.printForm = { id: null, date: todayISO(), result: 'ok', versionPath: vp, ...defaultsFor(m, vp) };
+  const plates = platesOf(m);
+  const pst = plateStatus(m);
+  const plateNo = plates.length > 1 ? (S.viewPlate && plates.some((p) => p.id === S.viewPlate) ? S.viewPlate : (plates.find((p) => pst[p.id] !== 'ok') || plates[0]).id) : '';
+  S.printForm = { id: null, date: todayISO(), result: 'ok', versionPath: vp, plateNo, ...defaultsFor(m, vp, plateNo) };
   S.tab = 'prints';
   S.scrollReset = true;
   renderInfo();
@@ -1237,7 +1294,7 @@ function collectForm() {
 function savePrint(m) {
   collectForm();
   const f = S.printForm;
-  const rec = { ...f, minutes: f.minutes ? +f.minutes : '', grams: f.grams ? +f.grams : '' };
+  const rec = { ...f, minutes: f.minutes ? +f.minutes : '', grams: f.grams ? +f.grams : '', plateNo: f.plateNo ? +f.plateNo : '' };
   if (!rec.versionPath) rec.versionPath = M.cur(m).path;
   if (f.id) {
     const i = m.prints.findIndex((p) => p.id === f.id);
