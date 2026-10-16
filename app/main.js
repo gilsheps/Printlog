@@ -87,7 +87,7 @@ const publicState = () => {
     version: app.getVersion(), platform: process.platform, library: c.library || '', mode: c.mode,
     cloud: c.cloud ? { email: c.cloud.email, region: c.cloud.region, loggedIn: !!c.cloud.token } : null,
     printers: c.printers.map((p) => ({ serial: p.serial, name: p.name, model: p.model, ip: p.ip || '', access_code: p.access_code || '' })),
-    options: c.options,
+    options: { ...c.options, closeToTray: c.options.closeToTray ?? (c.mode !== 'off') },
   };
 };
 ipcMain.handle('sync:state', () => publicState());
@@ -138,7 +138,20 @@ function createWindow(show = true) {
   win.removeMenu?.();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => { if (show) win.show(); });
-  win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide(); if (process.platform === 'darwin') app.dock?.hide(); } });
+  win.on('close', (e) => {
+    if (quitting) return;
+    const c = cfg();
+    const background = c.options.closeToTray ?? (c.mode !== 'off');
+    if (!background) { quitting = true; app.quit(); return; }
+    e.preventDefault();
+    win.hide();
+    if (process.platform === 'darwin') app.dock?.hide();
+    if (!c.options.closeHintShown && Notification.isSupported()) {
+      new Notification({ title: 'המדף ממשיך לרוץ ברקע', body: process.platform === 'darwin' ? 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: ⌘Q, או מהאייקון בשורת התפריטים ← יציאה.' : 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: האייקון במגש ← יציאה.' }).show();
+      c.options.closeHintShown = true;
+      saveCfg(c);
+    }
+  });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); shell.openExternal(url); } });
 }

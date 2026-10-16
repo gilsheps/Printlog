@@ -1,6 +1,6 @@
 import { Library, kvGet, kvSet, uid, baseName, dirName, stripExt, prettyName } from './store.js';
 import { parseModel, read3MFMeta, fileKind } from './parse.js';
-import { renderThumbnail, Viewer } from './render.js';
+import { renderThumbnail, Viewer, bedLayout } from './render.js';
 import { readSyncFile, importPrints, attach, norm } from './sync.js';
 import helperSrc from '../helper/shelf_sync.py';
 import { native, NativeDirHandle, toBlob } from './native.js';
@@ -374,6 +374,7 @@ async function nativeSettings() {
     <div class="section-title">כללי</div>
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
+    <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע (כדי לרשום הדפסות). ליציאה: ${st.platform === 'darwin' ? '⌘Q או האייקון בשורת התפריטים' : 'האייקון במגש'}</label>
     <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
   </div>`;
@@ -383,7 +384,7 @@ async function nativeSettings() {
   };
   const save = async (quiet) => {
     collect();
-    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, openAtLogin: $('#ologin', box).checked } });
+    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked } });
     printers = (st.printers || []).map((p) => ({ ...p }));
     if (!quiet) toast('ההגדרות נשמרו');
   };
@@ -573,6 +574,7 @@ async function makeThumb(path) {
           await lib.writeThumb(path, new Blob([meta.thumbPng], { type: 'image/png' }));
           wrote = true;
         }
+        if ((meta.plates || []).length > 1) for (const [id, png] of Object.entries(meta.plateThumbs || {})) await lib.writePlateThumb(path, +id, new Blob([png], { type: 'image/png' }));
       }
     }
     if (!wrote) {
@@ -585,7 +587,7 @@ async function makeThumb(path) {
       await lib.writeThumb(path, blob);
     }
     rec.metaKey = key;
-    rec.tv = 2;
+    rec.tv = 3;
     rec.failed = null;
     rec.error = null;
     rec.stale = false;
@@ -601,6 +603,11 @@ async function refreshThumb(path) {
   for (const el of $$(`[data-thumb="${CSS.escape(path)}"]`)) {
     if (url) el.innerHTML = `<img src="${url}" alt="" loading="lazy">`;
     else el.innerHTML = placeholder(path);
+  }
+  for (const el of $$(`[data-pthumb^="${CSS.escape(path)}#"]`)) {
+    if (el.dataset.pthumb.slice(0, el.dataset.pthumb.lastIndexOf('#')) !== path) continue;
+    const u = await lib.plateThumbURL(path, +el.dataset.pthumb.split('#').pop());
+    el.innerHTML = u ? `<img src="${u}" alt="" loading="lazy">` : placeholder(path);
   }
 }
 function placeholder(path) {
@@ -655,7 +662,10 @@ function renderShell() {
     renderAll();
   });
   $('#grid').addEventListener('click', onGridClick);
-  $('#toolbar').addEventListener('change', (e) => { if (e.target.id === 'sort') { S.sort = e.target.value; renderGrid(); } });
+  $('#toolbar').addEventListener('change', (e) => {
+    if (e.target.id === 'sort') { S.sort = e.target.value; renderGrid(); }
+    if (e.target.id === 'splitp') { lib.data.prefs = { ...(lib.data.prefs || {}), splitPlates: e.target.checked }; lib.save(); renderGrid(); }
+  });
   $('#toolbar').addEventListener('click', (e) => { if (e.target.closest('[data-clear]')) { S.tag = null; S.folder = null; S.q = ''; $('#q').value = ''; S.view = 'all'; renderAll(); } });
 
   // drag & drop import
@@ -779,6 +789,7 @@ function renderToolbar() {
     ${S.tag || S.folder != null || S.q || S.view !== 'all' ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
     <span id="prog" class="progress"></span>
     <span class="spacer" style="flex:1"></span>
+    ${M.list().some((m) => platesOf(m).length > 1) && !(S.view === 'inbox' && !S.tag && S.folder == null) ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
     <select class="sel" id="sort">
       <option value="recent" ${S.sort === 'recent' ? 'selected' : ''}>עודכן לאחרונה</option>
       <option value="printed" ${S.sort === 'printed' ? 'selected' : ''}>הדפסה אחרונה ביומן</option>
@@ -788,7 +799,8 @@ function renderToolbar() {
   if (S.progress) setProgress(S.progress.label, S.progress.frac);
 }
 
-function cardHTML(m) {
+function cardHTML({ m, plate }) {
+  if (plate) return plateCardHTML(m, plate);
   const v = M.cur(m);
   const rec = M.rec(v.path);
   const kind = fileKind(v.path);
@@ -814,9 +826,52 @@ function cardHTML(m) {
   </div>`;
 }
 
+// one card per build plate (each plate is a separate print, as in Bambu Studio)
+function plateCardHTML(m, plate) {
+  const v = M.cur(m);
+  const rec = M.rec(v.path);
+  const plates = platesOf(m);
+  const prints = m.prints.filter((p) => +p.plateNo === plate.id).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || '').localeCompare(a.at || ''));
+  const st = plateStatus(m)[plate.id] || 'never';
+  const stLabel = st === 'never' ? 'אין הדפסה רשומה' : `${RESULT[st]} · ${fmtDate(prints[0].date)}${prints.length > 1 ? ` · ${prints.length} הדפסות` : ''}`;
+  const key = v.path + '#' + plate.id;
+  const url = lib.thumbURLs.get(key);
+  return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}" data-plate="${plate.id}">
+    <div class="thumbwrap"><div class="thumb" data-pthumb="${esc(key)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div>
+    <div class="quick"><button data-q="ok" title="רשום: פלטה ${plate.id} הודפסה היום בהצלחה">${I.check}הודפס</button><button data-q="fail" title="רשום: פלטה ${plate.id} נכשלה היום">${I.close}נכשל</button></div></div>
+    <div class="badges"><span class="badge accent">פלטה ${plate.id}/${plates.length}</span>${fileKind(v.path) === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}</div>
+    <div class="check" data-check>${I.check}</div>
+    ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
+    <div class="body">
+      <div class="name" title="${esc(m.name)}">${esc(m.name)}${plate.name ? ` <span style="color:var(--ink3);font-weight:500">· ${esc(plate.name)}</span>` : ''}</div>
+      <div class="sub"><span class="st"><span class="sdot ${st}"></span>${stLabel}</span>${rec.missing ? ' · <span style="color:var(--fail)">חסר</span>' : ''}</div>
+      ${m.tags.length ? `<div class="tags">${m.tags.slice(0, 3).map((t) => tagHTML(t)).join('')}</div>` : ''}
+    </div>
+  </div>`;
+}
+function gridEntries(list) {
+  const split = lib.data.prefs?.splitPlates !== false;
+  const out = [];
+  for (const m of list) {
+    const plates = split ? platesOf(m) : [];
+    if (plates.length > 1) {
+      const pst = plateStatus(m);
+      for (const p of plates) {
+        const st = pst[p.id] || 'never';
+        if (S.view === 'ok' && st !== 'ok') continue;
+        if (S.view === 'fail' && !['fail', 'partial'].includes(st)) continue;
+        if (S.view === 'never' && st !== 'never') continue;
+        out.push({ m, plate: p });
+      }
+    } else out.push({ m, plate: null });
+  }
+  return out;
+}
+
 function renderGrid() {
   if (S.view === 'inbox' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderInbox(); return; }
   const list = filtered();
+  const entries = gridEntries(list);
   S.visible = list.map((m) => m.id);
   const g = $('#grid');
   g.classList.toggle('selecting', S.selected.size > 0);
@@ -826,15 +881,18 @@ function renderGrid() {
       : `<div class="empty" style="grid-column:1/-1"><b>התיקייה ריקה</b>גרור לכאן קבצי STL או 3MF, או שמור אותם לתיקייה ולחץ „רענן”.</div>`;
     return;
   }
-  g.innerHTML = list.map(cardHTML).join('');
-  for (const m of list) { const p = M.cur(m).path; if (!lib.thumbURLs.has(p) && M.rec(p).thumb) refreshThumb(p); }
+  g.innerHTML = entries.map(cardHTML).join('');
+  for (const { m, plate } of entries) {
+    const p = M.cur(m).path;
+    if (M.rec(p).thumb && !lib.thumbURLs.has(plate ? p + '#' + plate.id : p)) refreshThumb(p);
+  }
 }
 
-function quickLog(m, result) {
+function quickLog(m, result, forPlate) {
   const vp = M.cur(m).path;
   const plates = platesOf(m);
   const pst = plateStatus(m);
-  const plateNo = plates.length > 1 ? (plates.find((x) => pst[x.id] !== 'ok') || plates[0]).id : '';
+  const plateNo = forPlate || (plates.length > 1 ? (plates.find((x) => pst[x.id] !== 'ok') || plates[0]).id : '');
   const p = { id: uid(), at: new Date().toISOString(), date: todayISO(), result, versionPath: vp, plateNo, ...defaultsFor(m, vp, plateNo) };
   m.prints.push(p);
   M.touch(m);
@@ -853,7 +911,7 @@ function onGridClick(e) {
   if (!card) return;
   const id = card.dataset.id;
   const q = e.target.closest('[data-q]');
-  if (q) { quickLog(lib.data.models[id], q.dataset.q); return; }
+  if (q) { quickLog(lib.data.models[id], q.dataset.q, card.dataset.plate ? +card.dataset.plate : 0); return; }
   if (e.target.closest('[data-check]') || e.metaKey || e.ctrlKey || e.shiftKey || S.selected.size) {
     if (e.shiftKey && S.lastSel && S.visible) {
       const a = S.visible.indexOf(S.lastSel), b = S.visible.indexOf(id);
@@ -865,6 +923,7 @@ function onGridClick(e) {
     renderBulk();
     return;
   }
+  S.openPlate = card.dataset.plate ? +card.dataset.plate : 0;
   openModal(id);
 }
 
@@ -1016,9 +1075,12 @@ async function loadView(path) {
     const parsed = parseModel(path, buf);
     if (tok !== loadToken || !viewer) return;
     const plates = parsed.meta.plates || [];
+    const bed = parsed.meta.bed || { w: 256, d: 256 };
+    const layout = fileKind(path) !== 'stl' && (parsed.meta.plateCount || plates.length || parsed.meta.bed) ? bedLayout(parsed.parts, Math.max(parsed.meta.plateCount || 0, plates.length), bed.w, bed.d) : { ok: false };
     const showPlate = (id) => {
       const parts = id ? parsed.parts.filter((p) => p.plate === id) : parsed.parts;
-      const dims = viewer.show(parts);
+      const beds = layout.ok ? (id ? [layout.beds.get(id)] : [...layout.beds.values()]) : null;
+      const dims = beds ? viewer.showOnBeds(parts, beds) : viewer.show(parts);
       const tri = parts.reduce((a, p) => a + p.positions.length / 9, 0);
       $('#dims').classList.remove('hidden');
       $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(tri).toLocaleString('he-IL')} משולשים`;
@@ -1031,7 +1093,9 @@ async function loadView(path) {
       pe.onclick = (e) => { const b = e.target.closest('[data-plate]'); if (b) showPlate(+b.dataset.plate); };
       return dims;
     };
-    const dims = showPlate(plates.length > 1 ? plates[0].id : 0);
+    const want = S.openPlate && plates.some((p) => p.id === S.openPlate) ? S.openPlate : plates.length > 1 ? plates[0].id : 0;
+    S.openPlate = 0;
+    const dims = showPlate(want);
     ov.classList.add('hidden');
     rec.dims = dims;
     rec.triangles = parsed.meta.triangles || parsed.parts.reduce((a, p) => a + p.positions.length / 9, 0);

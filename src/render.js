@@ -46,6 +46,29 @@ function frameCamera(camera, radius, height, dir = new THREE.Vector3(1, 0.8, 1.1
   return target;
 }
 
+// Bambu Studio lays plates out in a grid: columns = ceil-ish sqrt(n), gap = 1/5 of the bed
+export function bedLayout(parts, plateCount, bedW = 256, bedD = 256) {
+  const n = Math.max(plateCount || 1, ...parts.map((p) => p.plate || 1));
+  const v = Math.sqrt(n), r = Math.round(v);
+  const cols = v > r ? r + 1 : r;
+  const beds = new Map();
+  for (let id = 1; id <= n; id++) {
+    const i = id - 1;
+    beds.set(id, { id, x: (i % cols) * bedW * 1.2, y: -Math.floor(i / cols) * bedD * 1.2, w: bedW, d: bedD });
+  }
+  // sanity check: every plate's objects must sit on (or near) its bed
+  let ok = true;
+  for (const p of parts) {
+    const b = beds.get(p.plate || 1);
+    const a = p.positions;
+    for (let k = 0; k < a.length && ok; k += 3 * 97) {
+      if (a[k] < b.x - 40 || a[k] > b.x + b.w + 40 || a[k + 1] < b.y - 40 || a[k + 1] > b.y + b.d + 40) ok = false;
+    }
+    if (!ok) break;
+  }
+  return { ok, beds };
+}
+
 function disposeGroup(group) {
   group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
 }
@@ -121,7 +144,55 @@ export class Viewer {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
+  // Bambu-style: objects stay where they are on the bed; one bed per plate
+  showOnBeds(parts, beds) {
+    if (this.group) { this.scene.remove(this.group); disposeGroup(this.group); }
+    const group = new THREE.Group();
+    const objs = new THREE.Group();
+    for (const p of parts) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
+      g.computeVertexNormals();
+      objs.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color), roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide })));
+    }
+    objs.rotation.x = -Math.PI / 2; // model (x, y, z) -> three (x, z, -y)
+    group.add(objs);
+    const css = getComputedStyle(document.documentElement);
+    const major = new THREE.Color(css.getPropertyValue('--plate-major').trim() || '#555');
+    const minor = new THREE.Color(css.getPropertyValue('--plate-minor').trim() || '#333');
+    const fill = css.getPropertyValue('--plate-fill').trim() || '#222';
+    const all = new THREE.Box3();
+    for (const b of beds) {
+      const cx = b.x + b.w / 2, cz = -(b.y + b.d / 2);
+      const grid = new THREE.GridHelper(Math.max(b.w, b.d), Math.round(Math.max(b.w, b.d) / 16), major, minor);
+      grid.material.transparent = true; grid.material.opacity = 0.7;
+      grid.scale.set(b.w / Math.max(b.w, b.d), 1, b.d / Math.max(b.w, b.d));
+      grid.position.set(cx, 0, cz);
+      group.add(grid);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.d), new THREE.MeshBasicMaterial({ color: fill, transparent: true, opacity: 0.6 }));
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(cx, -0.05, cz);
+      group.add(plane);
+      all.expandByPoint(new THREE.Vector3(b.x, 0, -b.y)).expandByPoint(new THREE.Vector3(b.x + b.w, 0, -(b.y + b.d)));
+    }
+    group.updateMatrixWorld(true);
+    const ob = new THREE.Box3().setFromObject(objs);
+    const osize = ob.isEmpty() ? new THREE.Vector3() : ob.getSize(new THREE.Vector3());
+    if (!ob.isEmpty()) all.union(ob);
+    const c = all.getCenter(new THREE.Vector3());
+    group.position.set(-c.x, 0, -c.z);
+    this.group = group;
+    this.scene.add(group);
+    this.plate.visible = false;
+    const size = all.getSize(new THREE.Vector3());
+    this.radius = Math.max(size.x, size.z) * 0.62 || 100;
+    this.height = Math.min(osize.y, this.radius);
+    this.setWire(this.wire);
+    this.resetView();
+    return { x: osize.x, y: osize.z, z: osize.y };
+  }
   show(parts) {
+    this.plate.visible = true;
     if (this.group) { this.scene.remove(this.group); disposeGroup(this.group); }
     const { group, dims, radius, height } = buildGroup(parts);
     this.group = group;

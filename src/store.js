@@ -213,6 +213,32 @@ export class Library {
     if (this.thumbURLs.has(path)) { URL.revokeObjectURL(this.thumbURLs.get(path)); this.thumbURLs.delete(path); }
     this.save();
   }
+  async writePlateThumb(path, plate, blob) {
+    const name = uid() + '.png';
+    const h = await this.thumbs.getFileHandle(name, { create: true });
+    const w = await h.createWritable();
+    await w.write(blob);
+    await w.close();
+    const rec = this.data.files[path];
+    rec.plateThumbs = rec.plateThumbs || {};
+    const old = rec.plateThumbs[plate];
+    rec.plateThumbs[plate] = name;
+    if (old && old !== name) { try { await this.thumbs.removeEntry(old); } catch { } }
+    this.thumbURLs.delete(path + '#' + plate);
+    this.save();
+  }
+  async plateThumbURL(path, plate) {
+    const key = path + '#' + plate;
+    if (this.thumbURLs.has(key)) return this.thumbURLs.get(key);
+    const name = this.data.files[path]?.plateThumbs?.[plate];
+    if (!name) return this.thumbURL(path);
+    try {
+      const f = await (await this.thumbs.getFileHandle(name)).getFile();
+      const url = URL.createObjectURL(await toBlob(f, 'image/png'));
+      this.thumbURLs.set(key, url);
+      return url;
+    } catch { return this.thumbURL(path); }
+  }
   async thumbURL(path) {
     if (this.thumbURLs.has(path)) return this.thumbURLs.get(path);
     const rec = this.data.files[path];
@@ -229,6 +255,6 @@ export class Library {
     if (!r || r.missing) return false;
     const key = this.thumbKey(path);
     if (r.failed === key) return false;
-    return !r.thumb || r.thumbKey !== key || r.metaKey !== key || r.tv !== 2;
+    return !r.thumb || r.thumbKey !== key || r.metaKey !== key || r.tv !== 3;
   }
 }

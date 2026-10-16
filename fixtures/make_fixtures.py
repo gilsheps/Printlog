@@ -119,6 +119,9 @@ def multi_plate_3mf(path):
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("3D/3dmodel.model", xml)
         z.writestr("Metadata/model_settings.config", '<?xml version="1.0"?><config>%s</config>' % "".join(plates))
+        for i, c in enumerate([(230, 80, 60), (60, 160, 90), (70, 110, 220), (200, 170, 40)]):
+            z.writestr("Metadata/plate_%d.png" % (i + 1), png(128, 128, c))
+        z.writestr("Metadata/project_settings.config", json.dumps({"printable_area": ["0x0", "256x0", "256x256", "0x256"], "printer_model": "Bambu Lab P2S"}))
 
 
 os.makedirs(os.path.join(OUT, "כלים"), exist_ok=True)

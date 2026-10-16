@@ -262,6 +262,8 @@ function extractMeta(files) {
     plates = ids.length > 1 ? ids.map((id) => ({ id, name: '' })) : [];
   }
   meta.plates = plates.length > 1 ? plates : [];
+  meta.plateThumbs = {};
+  for (const n of Object.keys(files)) { const mm = /^Metadata\/plate_(\d+)\.png$/i.exec(n); if (mm && files[n].length > 200) meta.plateThumbs[+mm[1]] = files[n]; }
   let settings = null;
   if (files['Metadata/project_settings.config']) {
     try { settings = JSON.parse(strFromU8(files['Metadata/project_settings.config'])); } catch { }
@@ -274,6 +276,11 @@ function extractMeta(files) {
   }
   const slice = files['Metadata/slice_info.config'] ? parseSliceInfo(strFromU8(files['Metadata/slice_info.config'])) : null;
   meta.print = summarizeSettings(settings, slice);
+  const area = settings && settings.printable_area;
+  if (Array.isArray(area) && area.length >= 3) {
+    const pts = area.map((s) => String(s).split('x').map(Number));
+    meta.bed = { w: Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), d: Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])) };
+  }
   meta.filamentColors = settings && Array.isArray(settings.filament_colour) ? settings.filament_colour : null;
   if (files['3D/3dmodel.model']) {
     const head = strFromU8(files['3D/3dmodel.model'].subarray(0, 300000));
@@ -364,6 +371,7 @@ export function parse3MF(buffer) {
   }
   const parts = [...buckets.entries()].map(([k, arr]) => { const i = k.indexOf('|'); return { plate: +k.slice(0, i), color: k.slice(i + 1), positions: new Float32Array(arr) }; });
   const used = [...new Set(parts.map((p) => p.plate))].filter(Boolean).sort((a, b) => a - b);
+  meta.plateCount = plates.length;
   meta.plates = used.length > 1 ? used.map((id) => ({ id, name: (plates.find((p) => p.id === id) || {}).name || '' })) : [];
   if (!parts.length) throw new Error('הקובץ לא מכיל גיאומטריה');
   if (!meta.title && root.metadata.Title) meta.title = root.metadata.Title;
