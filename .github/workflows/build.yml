@@ -37,6 +37,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run app:prepare
+      - name: Google Drive OAuth client (from repository secrets)
+        shell: bash
+        env:
+          GID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GSECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [ -n "$GID" ]; then
+            node -e "require('fs').writeFileSync('app/oauth.json', JSON.stringify({ client_id: process.env.GID, client_secret: process.env.GSECRET || '' }))"
+            echo "Google Drive archive: enabled"
+          else
+            echo "::notice::GOOGLE_CLIENT_ID secret not set - the Google Drive archive will be disabled in this build"
+          fi
       - name: Package
         shell: bash
         run: |

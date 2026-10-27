@@ -9,3 +9,4 @@ helper/test_*.py
 *.log
 .DS_Store
 __pycache__/
+app/oauth.json

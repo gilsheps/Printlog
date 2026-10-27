@@ -1,6 +1,6 @@
 // Library storage: lives inside the chosen folder, in ".shelf/"
 import { fileKind } from './parse.js';
-import { toBlob } from './native.js';
+import { toBlob, native } from './native.js';
 
 const META_DIR = '.shelf';
 const LIB_FILE = 'library.json';
@@ -102,7 +102,7 @@ export class Library {
 
     // which known paths disappeared?
     const missing = [];
-    for (const [path, mid] of owned) if (!present.has(path)) missing.push({ path, mid, info: D.files[path] || {} });
+    for (const [path, mid] of owned) if (!present.has(path) && !path.startsWith('@gdrive/')) missing.push({ path, mid, info: D.files[path] || {} });
     const fresh = infos.filter((i) => !owned.has(i.path));
     let added = 0, moved = 0;
 
@@ -162,6 +162,10 @@ export class Library {
 
   /* ---------- files ---------- */
   async getFile(path) {
+    if (path.startsWith('@gdrive/')) { // archived in Google Drive: fetched on demand by the app
+      const r = this.data.files[path] || {};
+      return { name: baseName(path), size: r.size || 0, lastModified: r.mtime || 0, type: '', arrayBuffer: () => native.fs.read(path), text: async () => new TextDecoder().decode(await native.fs.read(path)) };
+    }
     let h = this.handles.get(path);
     if (!h) h = await this.resolveHandle(path);
     return h.getFile();

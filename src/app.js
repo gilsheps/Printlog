@@ -46,7 +46,8 @@ const fmtBytes = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Ma
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
 const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-const dispPath = (p) => (String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : p);
+const dispPath = (p) => (String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
+const isArchived = (p) => /^@(archive|gdrive)\//.test(p);
 const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה', cancel: 'בוטלה' };
 // build plates of the model's current file (each plate = a separate print)
 function platesOf(m) { return (lib.data.files[(m.versions.find((v) => v.path === m.current) || m.versions[m.versions.length - 1]).path]?.meta?.plates) || []; }
@@ -158,7 +159,10 @@ async function boot() {
 
 async function openLibrary(dir) {
   lib = new Library(dir);
-  if (native) { try { const st = await native.sync.getState(); S.archiveDir = st.archiveDir || ''; if (st.archiveDir) lib.archive = new NativeDirHandle('@archive', 'ארכיון'); } catch { } }
+  if (native) {
+    try { const st = await native.sync.getState(); S.archiveDir = st.archiveDir || ''; if (st.archiveDir) lib.archive = new NativeDirHandle('@archive', 'ארכיון'); } catch { }
+    try { S.gdrive = await native.gdrive.status(); } catch { S.gdrive = null; }
+  }
   try { await lib.init(); } catch (e) { toast('שגיאה בפתיחת הספרייה: ' + e.message, true); return; }
   lib.on((t, e) => { if (t === 'save-error') toast('השמירה נכשלה: ' + (e && e.message), true); });
   if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view;
@@ -321,31 +325,58 @@ function printerDialog() {
 
 /* ---------- desktop app: cloud archive ---------- */
 // models that printed successfully but still have files in the working folder
-function toArchive() { return M.list().filter((m) => M.hasOk(m) && m.versions.some((v) => !v.path.startsWith('@archive/') && !M.rec(v.path).missing)); }
+const archiveOn = () => !!((S.gdrive && S.gdrive.connected) || S.archiveDir);
+function toArchive() { return M.list().filter((m) => M.hasOk(m) && m.versions.some((v) => !isArchived(v.path) && !M.rec(v.path).missing)); }
 async function archiveModels(models) {
-  const files = models.flatMap((m) => m.versions.filter((v) => !v.path.startsWith('@archive/') && !M.rec(v.path).missing));
-  const size = files.reduce((a, v) => a + (M.rec(v.path).size || 0), 0);
-  const ok = await dialog('להעביר לארכיון?', `${files.length} קבצים (${fmtBytes(size)}) יעברו מתיקיית המודלים לתיקיית הארכיון:<br><span class="mono">${esc(S.archiveDir)}</span><br>ההיסטוריה, התגיות וההערות נשמרות, והכרטיסים ימשיכו להופיע עם ☁.`, [{ label: 'העבר', value: true, primary: true }, { label: 'ביטול', value: false }]);
+  const useDrive = S.gdrive && S.gdrive.connected;
+  const files = models.flatMap((m) => m.versions.filter((v) => !isArchived(v.path) && !M.rec(v.path).missing).map((v) => ({ m, v })));
+  const size = files.reduce((a, { v }) => a + (M.rec(v.path).size || 0), 0);
+  const where = useDrive ? `לתיקייה <b>PrintLog Archive</b> ב-Google Drive (${esc(S.gdrive.email || '')})` : `לתיקייה <span class="mono">${esc(S.archiveDir)}</span>`;
+  const ok = await dialog('להעביר לארכיון?', `${files.length} קבצים (${fmtBytes(size)}) יועלו ${where} ויימחקו מהמחשב אחרי שההעלאה תיבדק.<br>ההיסטוריה, התגיות וההערות נשמרות, והכרטיסים ממשיכים להופיע עם ☁ ולהיפתח בתלת-ממד.`, [{ label: 'העבר', value: true, primary: true }, { label: 'ביטול', value: false }]);
   if (!ok) return;
-  let done = 0, failed = 0;
-  for (const v of files) {
-    setProgress(`מעביר לארכיון ${done + 1}/${files.length}`, done / files.length);
+  let done = 0, failed = 0, lastErr = '';
+  for (const { m, v } of files) {
+    setProgress(`${useDrive ? 'מעלה ל-Google Drive' : 'מעביר לארכיון'} ${done + failed + 1}/${files.length}`, (done + failed) / files.length);
     try {
-      const np = await native.archive.move(v.path);
-      const m = models.find((x) => x.versions.includes(v));
       const old = v.path;
-      lib.data.files[np] = { ...(lib.data.files[old] || {}) };
+      let np, meta = {};
+      if (useDrive) { const r = await native.gdrive.archive(old); np = r.path; meta = { size: r.size, mtime: r.mtime }; }
+      else np = await native.archive.move(old);
+      lib.data.files[np] = { ...(lib.data.files[old] || {}), ...meta, origPath: old, missing: false };
       delete lib.data.files[old];
       for (const p of m.prints) if (p.versionPath === old) p.versionPath = np;
       if (m.current === old) m.current = np;
       for (const k of [...lib.thumbURLs.keys()]) if (k === old || k.startsWith(old + '#')) lib.thumbURLs.delete(k);
       v.path = np;
       done++;
-    } catch (e) { failed++; console.warn(e); }
+      lib.save();
+    } catch (e) { failed++; lastErr = e.message; console.warn(e); }
   }
   setProgress(null);
-  lib.save();
-  toast(failed ? `${done} קבצים הועברו, ${failed} נכשלו` : `${done} קבצים הועברו לארכיון`, !!failed);
+  lib.save(true);
+  toast(failed ? `${done} קבצים הועברו, ${failed} נכשלו: ${lastErr}` : `${done} קבצים הועברו לארכיון ופינו ${fmtBytes(size)}`, !!failed);
+  if (S.open) closeModal();
+  await rescan(false);
+}
+async function restoreModel(m) {
+  const vs = m.versions.filter((v) => v.path.startsWith('@gdrive/'));
+  let done = 0;
+  for (const v of vs) {
+    setProgress(`מוריד מ-Google Drive ${done + 1}/${vs.length}`, done / vs.length);
+    try {
+      const rec = lib.data.files[v.path] || {};
+      const r = await native.gdrive.restore(v.path, rec.origPath || baseName(v.path));
+      lib.data.files[r.path] = { ...rec, size: r.size, mtime: r.mtime, origPath: undefined };
+      delete lib.data.files[v.path];
+      for (const p of m.prints) if (p.versionPath === v.path) p.versionPath = r.path;
+      if (m.current === v.path) m.current = r.path;
+      v.path = r.path;
+      done++;
+    } catch (e) { toast('ההחזרה נכשלה: ' + e.message, true); }
+  }
+  setProgress(null);
+  lib.save(true);
+  if (done) toast(`${done} קבצים הוחזרו לתיקייה`);
   if (S.open) closeModal();
   await rescan(false);
 }
@@ -371,6 +402,7 @@ async function checkUpdate(manual) {
 /* ---------- desktop app: settings ---------- */
 async function nativeSettings() {
   let st = await native.sync.getState();
+  let gd = await native.gdrive.status().catch(() => null);
   let login = { step: 'form', msg: '' };
   let printers = (st.printers || []).map((p) => ({ ...p }));
   const box = document.createElement('div');
@@ -415,9 +447,12 @@ async function nativeSettings() {
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
-    <div class="section-title">ארכיון בענן</div>
-    <div class="acct"><span>${st.archiveDir ? `תיקיית ארכיון: <b class="ltr mono">${esc(st.archiveDir)}</b>` : 'לא נבחרה תיקיית ארכיון'}</span><button class="btn small" data-pickarchive>${st.archiveDir ? 'החלף' : 'בחר תיקייה'}</button>${st.archiveDir ? '<button class="btn small ghost" data-cleararchive>הסר</button>' : ''}</div>
-    <div class="hint">קבצים שהצליחו אפשר להעביר לכאן כדי לפנות מקום. הם ממשיכים להופיע בספרייה עם ☁ ונפתחים כרגיל. מומלץ לבחור תיקייה בתוך <b>Google Drive</b> ולהגדיר את Drive למצב <b>Stream files</b>: ${st.platform === 'darwin' ? 'Google Drive בשורת התפריטים ← ⚙ ← Preferences ← Google Drive ← Stream files' : 'Google Drive במגש ← ⚙ ← Preferences ← Google Drive ← Stream files (הקבצים יופיעו בכונן G:)'}. במצב הזה הקבצים שמורים בענן ויורדים רק כשפותחים אותם.</div>
+    <div class="section-title">ארכיון ב-Google Drive</div>
+    ${!gd || !gd.available ? `<div class="hint">בגרסה הזו לא מוגדר מפתח Google, ולכן הארכיון לא זמין.</div>`
+      : gd.connected ? `<div class="acct"><span>מחובר בתור <b class="ltr">${esc(gd.email || '')}</b> · הקבצים נשמרים בתיקייה <b>PrintLog Archive</b></span><button class="btn small ghost danger" data-gdout>התנתק</button></div>`
+      : `<div class="acct"><span>לא מחובר</span><button class="btn small primary" data-gdin>התחבר ל-Google Drive</button></div>`}
+    <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
+    ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
     <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
   </div>`;
@@ -478,6 +513,15 @@ async function nativeSettings() {
     }
     const rm = t.closest('[data-rmp]');
     if (rm) { collect(); printers.splice(+rm.dataset.rmp, 1); draw(); return; }
+    if (t.closest('[data-gdin]')) {
+      const b = t.closest('[data-gdin]'); b.disabled = true; b.textContent = 'ממתין לאישור בדפדפן…';
+      const r = await native.gdrive.connect();
+      if (r.ok) toast('מחובר ל-Google Drive'); else toast('ההתחברות ל-Google Drive נכשלה: ' + r.error, true);
+      gd = S.gdrive = await native.gdrive.status();
+      draw(); renderToolbar();
+      return;
+    }
+    if (t.closest('[data-gdout]')) { await native.gdrive.disconnect(); gd = S.gdrive = await native.gdrive.status(); draw(); renderToolbar(); return; }
     if (t.closest('[data-pickarchive]')) {
       const r = await native.archive.pick();
       if (r && r.error) toast(r.error, true);
@@ -888,7 +932,7 @@ async function coverURL(file) {
 function itemFileBadge(it) {
   if (!it.model) return '<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>';
   const p = M.cur(it.model).path;
-  return p.startsWith('@archive/') ? '<span class="badge" title="הקובץ בארכיון בענן">☁ ארכיון</span>' : '<span class="badge" title="הקובץ בתיקייה">📁</span>';
+  return isArchived(p) ? '<span class="badge" title="הקובץ בארכיון בענן">☁ ארכיון</span>' : '<span class="badge" title="הקובץ בתיקייה">📁</span>';
 }
 
 function itemCardHTML(it, kind) {
@@ -1016,7 +1060,7 @@ function renderToolbar() {
     <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : itemsView ? 'פריטים' : 'קבצים'}</span>
     ${S.tag || S.folder != null || S.q ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
     <span id="prog" class="progress"></span>
-    ${native && S.archiveDir && S.view === 'ok' && itemsView && toArchive().length ? `<button class="btn small" data-archiveall title="מעביר לארכיון את הקבצים של כל מה שהצליח">☁ העבר לארכיון (${toArchive().length})</button>` : ''}
+    ${native && archiveOn() && S.view === 'ok' && itemsView && toArchive().length ? `<button class="btn small" data-archiveall title="מעביר לארכיון את הקבצים של כל מה שהצליח">☁ העבר לארכיון (${toArchive().length})</button>` : ''}
     <span class="spacer" style="flex:1"></span>
     ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist && !itemsView ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
     ${hist || itemsView ? '' : `<select class="sel" id="sort">
@@ -1433,7 +1477,8 @@ function detailsTab(m) {
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn small" id="dl">${I.download}הורד עותק</button>
       <button class="btn small" id="logprint">${I.plus}רשום הדפסה</button>
-      ${native && S.archiveDir && !M.cur(m).path.startsWith('@archive/') ? `<button class="btn small" id="toarchive">☁ העבר לארכיון</button>` : ''}
+      ${native && archiveOn() && !isArchived(M.cur(m).path) ? `<button class="btn small" id="toarchive">☁ העבר לארכיון</button>` : ''}
+      ${native && m.versions.some((v) => v.path.startsWith('@gdrive/')) ? `<button class="btn small" id="restore">החזר לתיקייה</button>` : ''}
     </div>`;
 }
 
@@ -1537,6 +1582,7 @@ function bindInfo(m) {
     if (rm) { m.tags = m.tags.filter((x) => x !== rm.dataset.rmtag); M.touch(m); renderInfo(); return; }
     if (t.closest('#dl')) { downloadFile(S.viewPath); return; }
     if (t.closest('#toarchive')) { archiveModels([m]); return; }
+    if (t.closest('#restore')) { restoreModel(m); return; }
     if (t.closest('#logprint') || t.closest('#newprint')) { startPrintForm(m); return; }
     const ep = t.closest('[data-editprint]');
     if (ep) { const p = m.prints.find((x) => x.id === ep.dataset.editprint); S.printForm = { ...p }; S.tab = 'prints'; S.scrollReset = true; renderInfo(); return; }

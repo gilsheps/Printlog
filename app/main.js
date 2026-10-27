@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeIma
 const path = require('path');
 const fs = require('fs');
 const { Engine, discover } = require('./engine');
+const { GDrive } = require('./gdrive');
 
 // Internal name stays 'Model Shelf' on purpose: settings and the encrypted Bambu sign-in are
 // stored under it, so renaming the app (now PrintLog) keeps them. Shown name comes from productName.
@@ -57,6 +58,7 @@ ipcMain.handle('fs:stat', async (_e, rel) => {
   try { const s = await fs.promises.stat(resolveRel(rel)); return { size: s.size, mtime: Math.round(s.mtimeMs), dir: s.isDirectory() }; } catch { return null; }
 });
 ipcMain.handle('fs:read', async (_e, rel) => {
+  if (String(rel).startsWith('@gdrive/')) return gdriveRead(rel);
   const b = await fs.promises.readFile(resolveRel(rel));
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
 });
@@ -117,6 +119,74 @@ ipcMain.handle('lib:pick', async () => {
   engine.start();
   return { path: c.library, name: path.basename(c.library) };
 });
+/* ---------------- Google Drive archive ---------------- */
+const gdrive = new GDrive({
+  appDir: __dirname,
+  getAuth: () => {
+    const g = cfg().gdrive;
+    if (!g) return null;
+    let refresh = g.refresh || '';
+    if (!refresh && g.refreshEnc) { try { refresh = safeStorage.decryptString(Buffer.from(g.refreshEnc, 'base64')); } catch { } }
+    return { ...g, refresh };
+  },
+  setAuth: (a) => {
+    const c = cfg();
+    if (!a) delete c.gdrive;
+    else {
+      const g = { email: a.email || c.gdrive?.email || '', folderId: a.folderId || '' };
+      if (a.refresh) { if (safeStorage.isEncryptionAvailable()) g.refreshEnc = safeStorage.encryptString(a.refresh).toString('base64'); else g.refresh = a.refresh; }
+      c.gdrive = g;
+    }
+    saveCfg(c);
+  },
+  openExternal: (u) => (process.env.PRINTLOG_GOOGLE_TEST_BASE ? fetch(u).catch(() => {}) : shell.openExternal(u)),
+  log: (m) => console.log(m),
+});
+const gcache = path.join(app.getPath('userData'), 'gdrive-cache');
+// '@gdrive/<fileId>/<name>' -> file bytes (kept in a small local cache)
+async function gdriveRead(rel) {
+  const id = String(rel).split('/')[1];
+  const f = path.join(gcache, id);
+  let b;
+  if (fs.existsSync(f)) b = await fs.promises.readFile(f);
+  else {
+    b = await gdrive.download(id, f);
+    try { // keep the cache under ~2 GB
+      const files = fs.readdirSync(gcache).map((n) => ({ n, s: fs.statSync(path.join(gcache, n)) })).sort((x, y) => x.s.atimeMs - y.s.atimeMs);
+      let total = files.reduce((a, x) => a + x.s.size, 0);
+      for (const x of files) { if (total < 2e9) break; fs.unlinkSync(path.join(gcache, x.n)); total -= x.s.size; }
+    } catch { }
+  }
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+}
+ipcMain.handle('gdrive:status', () => ({ available: gdrive.available(), connected: gdrive.connected(), email: cfg().gdrive?.email || '' }));
+ipcMain.handle('gdrive:connect', async () => {
+  try { const r = await gdrive.connect(); win && win.focus(); return { ok: true, email: r.email }; }
+  catch (e) { return { ok: false, error: e.message === 'missing-client' ? 'בגרסה הזו חסר מפתח Google (OAuth client).' : e.message }; }
+});
+ipcMain.handle('gdrive:disconnect', () => { gdrive.disconnect(); return true; });
+// upload to Drive, verify, then remove the local file
+ipcMain.handle('gdrive:archive', async (_e, rel) => {
+  const src = resolveRel(rel);
+  const r = await gdrive.upload(src, rel);
+  try { fs.mkdirSync(gcache, { recursive: true }); fs.copyFileSync(src, path.join(gcache, r.id)); } catch { }
+  await fs.promises.unlink(src);
+  return { path: `@gdrive/${r.id}/${path.basename(src)}`, size: r.size, mtime: r.mtime };
+});
+// bring a file back from Drive into the models folder (and remove it from Drive)
+ipcMain.handle('gdrive:restore', async (_e, gpath, destRel) => {
+  const id = String(gpath).split('/')[1];
+  let dst = resolveRel(destRel);
+  for (let i = 2; fs.existsSync(dst); i++) dst = resolveRel(destRel).replace(/(\.gcode\.3mf|\.[^.]+)$/i, ` (${i})$1`);
+  const buf = Buffer.from(await gdriveRead(gpath));
+  await fs.promises.mkdir(path.dirname(dst), { recursive: true });
+  await fs.promises.writeFile(dst, buf);
+  await gdrive.remove(id).catch(() => {});
+  try { fs.unlinkSync(path.join(gcache, id)); } catch { }
+  const st = fs.statSync(dst);
+  return { path: path.relative(cfg().library, dst).split(path.sep).join('/'), size: st.size, mtime: Math.round(st.mtimeMs) };
+});
+
 const publicState = () => {
   const c = cfg();
   return {

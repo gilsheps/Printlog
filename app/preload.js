@@ -10,6 +10,13 @@ contextBridge.exposeInMainWorld('shelfNative', {
     mkdir: (rel) => ipcRenderer.invoke('fs:mkdir', rel),
     remove: (rel) => ipcRenderer.invoke('fs:remove', rel),
   },
+  gdrive: {
+    status: () => ipcRenderer.invoke('gdrive:status'),
+    connect: () => ipcRenderer.invoke('gdrive:connect'),
+    disconnect: () => ipcRenderer.invoke('gdrive:disconnect'),
+    archive: (rel) => ipcRenderer.invoke('gdrive:archive', rel),
+    restore: (gpath, destRel) => ipcRenderer.invoke('gdrive:restore', gpath, destRel),
+  },
   archive: {
     pick: () => ipcRenderer.invoke('archive:pick'),
     clear: () => ipcRenderer.invoke('archive:clear'),
