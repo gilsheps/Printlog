@@ -394,15 +394,19 @@ class Engine {
     const cfg = this.getConfig();
     if (!this.out || !cfg.cloud?.token) return;
     let next = Math.max(2, cfg.options?.intervalMin || 10) * 60000;
+    let result;
     try {
       const n = await this.syncHistory(first);
       this.log(`cloud history: ${n} new`);
+      result = { ok: true, added: n };
     } catch (e) {
       this.log(`cloud sync failed: ${e.message}`);
       if (this.out) this.out.setHelper({ lastError: e.message, needsLogin: e instanceof AuthExpired });
       next = e instanceof AuthExpired ? 6 * 3600000 : 300000;
+      result = { ok: false, error: e.message };
     }
     this.timer = setTimeout(() => this.loopHistory(false), next);
+    return result;
   }
   async syncHistory(first) {
     const cfg = this.getConfig();

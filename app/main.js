@@ -21,6 +21,8 @@ function readCfg() {
   }
   c.options = { notify: true, openAtLogin: false, intervalMin: 10, ...(c.options || {}) };
   c.mode = c.mode || 'off';
+  // 1.0.5: the app no longer stays in the background unless the user turns it on again
+  if ((c.cfgVer || 0) < 2) { c.options.closeToTray = false; c.options.openAtLogin = false; c.cfgVer = 2; try { writeCfg(c); } catch { } }
   c.printers = c.printers || [];
   return c;
 }
@@ -87,7 +89,7 @@ const publicState = () => {
     version: app.getVersion(), platform: process.platform, library: c.library || '', mode: c.mode,
     cloud: c.cloud ? { email: c.cloud.email, region: c.cloud.region, loggedIn: !!c.cloud.token } : null,
     printers: c.printers.map((p) => ({ serial: p.serial, name: p.name, model: p.model, ip: p.ip || '', access_code: p.access_code || '' })),
-    options: { ...c.options, closeToTray: c.options.closeToTray ?? (c.mode !== 'off') },
+    options: { ...c.options, closeToTray: !!c.options.closeToTray },
   };
 };
 ipcMain.handle('sync:state', () => publicState());
@@ -109,7 +111,12 @@ ipcMain.handle('sync:login', (_e, a) => engine.login(a));
 ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
 ipcMain.handle('sync:discover', () => discover());
-ipcMain.handle('sync:now', () => engine.loopHistory(false));
+ipcMain.handle('sync:now', async () => {
+  const c = cfg();
+  if (!c.cloud?.token || !(c.mode === 'cloud' || c.mode === 'both')) return { ok: false, skipped: true };
+  if (!engine.out) engine.start();
+  return engine.loopHistory(false);
+});
 
 /* ---------------- updates: compare with the latest GitHub Release ---------------- */
 const RELEASES = 'https://api.github.com/repos/gilsheps/model-shelf/releases/latest';
@@ -141,7 +148,7 @@ function createWindow(show = true) {
   win.on('close', (e) => {
     if (quitting) return;
     const c = cfg();
-    const background = c.options.closeToTray ?? (c.mode !== 'off');
+    const background = !!c.options.closeToTray; // default: closing the window quits
     if (!background) { quitting = true; app.quit(); return; }
     e.preventDefault();
     win.hide();

@@ -376,7 +376,7 @@ async function nativeSettings() {
     <div class="section-title">כללי</div>
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
-    <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע (כדי לרשום הדפסות). ליציאה: ${st.platform === 'darwin' ? '⌘Q או האייקון בשורת התפריטים' : 'האייקון במגש'}</label>
+    <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
     <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
   </div>`;
@@ -643,7 +643,20 @@ function renderShell() {
   <div id="modal"></div>`;
 
   $('#q').addEventListener('input', (e) => { S.q = e.target.value; renderGrid(); renderToolbar(); });
-  $('#rescan').onclick = () => rescan(false);
+  $('#rescan').onclick = async () => {
+    await rescan(false);
+    if (native) {
+      const st = await native.sync.getState();
+      if (st.cloud?.loggedIn && (st.mode === 'cloud' || st.mode === 'both')) {
+        setProgress('מושך היסטוריית הדפסות מ-Bambu…', null);
+        const r = await native.sync.syncNow();
+        setProgress(null);
+        await syncPrints(true);
+        if (r && r.ok === false && !r.skipped) toast('המשיכה מ-Bambu נכשלה: ' + (r.error || ''), true);
+        else if (r && r.ok && !r.added) toast('אין הדפסות חדשות ב-Bambu');
+      }
+    }
+  };
   $('#theme').onclick = () => {
     const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     const next = cur === 'dark' ? 'light' : 'dark';
