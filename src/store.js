@@ -33,7 +33,7 @@ export function baseName(path) { return path.split('/').pop(); }
 export function dirName(path) { const i = path.lastIndexOf('/'); return i < 0 ? '' : path.slice(0, i); }
 export function stripExt(name) { return name.replace(/\.gcode\.3mf$/i, '').replace(/\.(stl|3mf)$/i, ''); }
 export function prettyName(name) {
-  return stripExt(name).replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return stripExt(name).replace(/[_+]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export class Library {
@@ -81,6 +81,7 @@ export class Library {
   async scan(progress) {
     const found = [];
     await this.walk(this.root, '', found, progress);
+    if (this.archive) { try { await this.walk(this.archive, '@archive', found, progress); } catch (e) { this.emit('archive-error', e); } }
     const infos = [];
     for (const f of found) {
       try {
@@ -166,8 +167,9 @@ export class Library {
     return h.getFile();
   }
   async resolveHandle(path, create = false) {
-    const parts = path.split('/');
+    let parts = path.split('/');
     let dir = this.root;
+    if (parts[0] === '@archive' && this.archive) { dir = this.archive; parts = parts.slice(1); }
     for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i], { create });
     const h = await dir.getFileHandle(parts[parts.length - 1], { create });
     this.handles.set(path, h);

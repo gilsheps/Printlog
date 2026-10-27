@@ -1,7 +1,7 @@
 import { Library, kvGet, kvSet, uid, baseName, dirName, stripExt, prettyName } from './store.js';
 import { parseModel, read3MFMeta, fileKind } from './parse.js';
 import { renderThumbnail, Viewer, bedLayout } from './render.js';
-import { readSyncFile, importPrints, attach, norm } from './sync.js';
+import { readSyncFile, importPrints, attach, norm, isGeneric, entryResult } from './sync.js';
 import helperSrc from '../helper/shelf_sync.py';
 import { native, NativeDirHandle, toBlob } from './native.js';
 
@@ -11,6 +11,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const I = {
+  mark: '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50.00,27.00 76.00,42.00 50.00,57.00 24.00,42.00" fill="#fff"/><polygon points="24.00,42.80 50.00,57.80 50.00,62.20 24.00,47.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,57.80 76.00,42.80 76.00,47.20 50.00,62.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,48.80 50.00,63.80 50.00,68.20 24.00,53.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,63.80 76.00,48.80 76.00,53.20 50.00,68.20" fill="#fff" fill-opacity="0.5"/><polygon points="24.00,54.80 50.00,69.80 50.00,74.20 24.00,59.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,69.80 76.00,54.80 76.00,59.20 50.00,74.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,60.80 50.00,75.80 50.00,80.20 24.00,65.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,75.80 76.00,60.80 76.00,65.20 50.00,80.20" fill="#fff" fill-opacity="0.5"/><polygon points="24.00,66.80 50.00,81.80 50.00,86.20 24.00,71.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,81.80 76.00,66.80 76.00,71.20 50.00,86.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,72.80 50.00,87.80 50.00,92.20 24.00,77.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,87.80 76.00,72.80 76.00,77.20 50.00,92.20" fill="#fff" fill-opacity="0.5"/><polygon points="41.00,11.00 59.00,11.00 54.00,20.00 46.00,20.00" fill="#1f1d1a"/><polygon points="47.80,20.00 52.20,20.00 50.00,24.50" fill="#1f1d1a"/></svg>',
   logo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 18h16M6 14h12M8 10h8M10 6h4"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
   folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
@@ -45,6 +46,7 @@ const fmtBytes = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Ma
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
 const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const dispPath = (p) => (String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : p);
 const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה', cancel: 'בוטלה' };
 // build plates of the model's current file (each plate = a separate print)
 function platesOf(m) { return (lib.data.files[(m.versions.find((v) => v.path === m.current) || m.versions[m.versions.length - 1]).path]?.meta?.plates) || []; }
@@ -82,7 +84,7 @@ function dialog(title, text, buttons) {
 
 /* ================= state ================= */
 let lib = null;
-const S = { q: '', view: 'all', tag: null, folder: null, sort: 'recent', selected: new Set(), open: null, tab: 'details', viewPath: null, printForm: null, lastScan: 0 };
+const S = { q: '', view: 'ok', tag: null, folder: null, sort: 'recent', selected: new Set(), open: null, tab: 'details', viewPath: null, printForm: null, lastScan: 0 };
 const useOPFS = new URLSearchParams(location.search).has('opfs');
 
 const M = {
@@ -119,9 +121,9 @@ async function boot() {
   const saved = !native && supported ? await kvGet('root') : null;
   root.innerHTML = `
   <section id="welcome"><div class="welcome-card">
-    <div class="logo"><span class="logo-mark" style="color:#fff">${I.logo}</span>המדף</div>
+    <div class="logo"><span class="logo-mark">${I.mark}</span>PrintLog</div>
     <h1>כל המודלים שלך, במקום אחד.</h1>
-    <p>בוחרים פעם אחת את תיקיית ה-STL וה-3MF. המדף סורק אותה, מציג כל מודל בתלת-ממד, ושומר תגיות, הערות, גרסאות ויומן הדפסות בתוך התיקייה עצמה.</p>
+    <p>בוחרים פעם אחת את תיקיית ה-STL וה-3MF. PrintLog סורק אותה, מציג כל מודל בתלת-ממד, ושומר תגיות, הערות, גרסאות ויומן הדפסות בתוך התיקייה עצמה.</p>
     <div class="welcome-actions">
       ${supported ? (saved ? `<button class="btn primary" id="resume">${I.folder} המשך עם „${esc(saved.name)}”</button><button class="btn ghost" id="pick">בחר תיקייה אחרת</button>` : `<button class="btn primary" id="pick">${I.folder} בחר תיקיית מודלים</button>`) : ''}
     </div>
@@ -156,6 +158,7 @@ async function boot() {
 
 async function openLibrary(dir) {
   lib = new Library(dir);
+  if (native) { try { const st = await native.sync.getState(); S.archiveDir = st.archiveDir || ''; if (st.archiveDir) lib.archive = new NativeDirHandle('@archive', 'ארכיון'); } catch { } }
   try { await lib.init(); } catch (e) { toast('שגיאה בפתיחת הספרייה: ' + e.message, true); return; }
   lib.on((t, e) => { if (t === 'save-error') toast('השמירה נכשלה: ' + (e && e.message), true); });
   if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view;
@@ -291,7 +294,7 @@ function printerDialog() {
       ${h.lastError ? `<div class="notice" style="margin-top:10px">${esc(h.lastError)}</div>` : ''}
       ${st.kind === 'login' ? `<div class="hint">הרץ שוב את ההגדרה כדי להתחבר:${code(cmds(isWin ? 'win' : 'mac')[1])}</div>` : ''}
       ${st.kind === 'stale' ? `<div class="hint">הפעל את התוכנה שוב (או את ההפעלה האוטומטית):${code(cmds(isWin ? 'win' : 'mac')[2])}</div>` : ''}
-    </div>` : `<p>המדף יכול לרשום הדפסות לבד: לייבא את כל היסטוריית ההדפסות מחשבון Bambu, ולרשום כל הדפסה חדשה שמסתיימת או נכשלת. בשביל זה צריך תוכנת עזר קטנה שרצה ברקע במחשב, כי דף בדפדפן לא יכול להתחבר למדפסת או לענן בעצמו.</p>`}
+    </div>` : `<p>PrintLog יכול לרשום הדפסות לבד: לייבא את כל היסטוריית ההדפסות מחשבון Bambu, ולרשום כל הדפסה חדשה שמסתיימת או נכשלת. בשביל זה צריך תוכנת עזר קטנה שרצה ברקע במחשב, כי דף בדפדפן לא יכול להתחבר למדפסת או לענן בעצמו.</p>`}
     <details ${d ? '' : 'open'} class="setup"><summary>${d ? 'הוראות התקנה' : 'התקנה'}</summary>
       <div class="ostabs"><button class="btn small ${isWin ? '' : 'on'}" data-os="mac">Mac</button><button class="btn small ${isWin ? 'on' : ''}" data-os="win">Windows</button></div>
       <div id="steps">${steps(isWin ? 'win' : 'mac')}</div>
@@ -314,6 +317,37 @@ function printerDialog() {
     if (t.closest('[data-goinbox]')) { e.preventDefault(); box.remove(); S.view = 'inbox'; S.tag = null; S.folder = null; renderAll(); }
   });
   document.body.appendChild(box);
+}
+
+/* ---------- desktop app: cloud archive ---------- */
+// models that printed successfully but still have files in the working folder
+function toArchive() { return M.list().filter((m) => M.hasOk(m) && m.versions.some((v) => !v.path.startsWith('@archive/') && !M.rec(v.path).missing)); }
+async function archiveModels(models) {
+  const files = models.flatMap((m) => m.versions.filter((v) => !v.path.startsWith('@archive/') && !M.rec(v.path).missing));
+  const size = files.reduce((a, v) => a + (M.rec(v.path).size || 0), 0);
+  const ok = await dialog('להעביר לארכיון?', `${files.length} קבצים (${fmtBytes(size)}) יעברו מתיקיית המודלים לתיקיית הארכיון:<br><span class="mono">${esc(S.archiveDir)}</span><br>ההיסטוריה, התגיות וההערות נשמרות, והכרטיסים ימשיכו להופיע עם ☁.`, [{ label: 'העבר', value: true, primary: true }, { label: 'ביטול', value: false }]);
+  if (!ok) return;
+  let done = 0, failed = 0;
+  for (const v of files) {
+    setProgress(`מעביר לארכיון ${done + 1}/${files.length}`, done / files.length);
+    try {
+      const np = await native.archive.move(v.path);
+      const m = models.find((x) => x.versions.includes(v));
+      const old = v.path;
+      lib.data.files[np] = { ...(lib.data.files[old] || {}) };
+      delete lib.data.files[old];
+      for (const p of m.prints) if (p.versionPath === old) p.versionPath = np;
+      if (m.current === old) m.current = np;
+      for (const k of [...lib.thumbURLs.keys()]) if (k === old || k.startsWith(old + '#')) lib.thumbURLs.delete(k);
+      v.path = np;
+      done++;
+    } catch (e) { failed++; console.warn(e); }
+  }
+  setProgress(null);
+  lib.save();
+  toast(failed ? `${done} קבצים הועברו, ${failed} נכשלו` : `${done} קבצים הועברו לארכיון`, !!failed);
+  if (S.open) closeModal();
+  await rescan(false);
 }
 
 /* ---------- desktop app: updates ---------- */
@@ -381,6 +415,9 @@ async function nativeSettings() {
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
+    <div class="section-title">ארכיון בענן</div>
+    <div class="acct"><span>${st.archiveDir ? `תיקיית ארכיון: <b class="ltr mono">${esc(st.archiveDir)}</b>` : 'לא נבחרה תיקיית ארכיון'}</span><button class="btn small" data-pickarchive>${st.archiveDir ? 'החלף' : 'בחר תיקייה'}</button>${st.archiveDir ? '<button class="btn small ghost" data-cleararchive>הסר</button>' : ''}</div>
+    <div class="hint">קבצים שהצליחו אפשר להעביר לכאן כדי לפנות מקום. הם ממשיכים להופיע בספרייה עם ☁ ונפתחים כרגיל. מומלץ לבחור תיקייה בתוך <b>Google Drive</b> ולהגדיר את Drive למצב <b>Stream files</b>: ${st.platform === 'darwin' ? 'Google Drive בשורת התפריטים ← ⚙ ← Preferences ← Google Drive ← Stream files' : 'Google Drive במגש ← ⚙ ← Preferences ← Google Drive ← Stream files (הקבצים יופיעו בכונן G:)'}. במצב הזה הקבצים שמורים בענן ויורדים רק כשפותחים אותם.</div>
     <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
   </div>`;
@@ -441,6 +478,13 @@ async function nativeSettings() {
     }
     const rm = t.closest('[data-rmp]');
     if (rm) { collect(); printers.splice(+rm.dataset.rmp, 1); draw(); return; }
+    if (t.closest('[data-pickarchive]')) {
+      const r = await native.archive.pick();
+      if (r && r.error) toast(r.error, true);
+      else if (r) { S.archiveDir = r.path; lib.archive = new NativeDirHandle('@archive', 'ארכיון'); st = await native.sync.getState(); draw(); rescan(false); toast('תיקיית הארכיון נשמרה'); }
+      return;
+    }
+    if (t.closest('[data-cleararchive]')) { await native.archive.clear(); S.archiveDir = ''; lib.archive = null; st = await native.sync.getState(); draw(); rescan(false); return; }
     if (t.closest('[data-changelib]')) {
       const info = await native.pickFolder();
       if (info) location.reload();
@@ -628,7 +672,7 @@ function renderShell() {
   $('#root').innerHTML = `
   <div id="app">
     <header class="top">
-      <div class="logo"><span class="logo-mark" style="color:#fff">${I.logo}</span>המדף</div>
+      <div class="logo"><span class="logo-mark">${I.mark}</span>PrintLog</div>
       <div class="search">${I.search}<input id="q" placeholder="חיפוש לפי שם, תגית, הערה, מעצב…" autocomplete="off"><kbd>/</kbd></div>
       <div class="spacer"></div>
       <button class="btn ghost ppill" id="ppill" title="חיבור למדפסת"></button>
@@ -685,7 +729,10 @@ function renderShell() {
     if (e.target.id === 'sort') { S.sort = e.target.value; renderGrid(); }
     if (e.target.id === 'splitp') { lib.data.prefs = { ...(lib.data.prefs || {}), splitPlates: e.target.checked }; lib.save(); renderGrid(); }
   });
-  $('#toolbar').addEventListener('click', (e) => { if (e.target.closest('[data-clear]')) { S.tag = null; S.folder = null; S.q = ''; $('#q').value = ''; S.view = 'all'; renderAll(); } });
+  $('#toolbar').addEventListener('click', (e) => {
+    if (e.target.closest('[data-clear]')) { if (S.tag || S.folder != null) S.view = 'all'; S.tag = null; S.folder = null; S.q = ''; $('#q').value = ''; renderAll(); }
+    if (e.target.closest('[data-archiveall]')) archiveModels(toArchive());
+  });
 
   // drag & drop import
   let dragDepth = 0;
@@ -738,39 +785,199 @@ function setProgress(label, frac) {
 function renderSidebar() {
   const models = M.list();
   const tags = new Map(), folders = new Map();
-  let prints = 0, okp = 0;
   for (const m of models) {
     for (const t of m.tags) tags.set(t, (tags.get(t) || 0) + 1);
     const d = dirName(M.cur(m).path) || '';
     folders.set(d, (folders.get(d) || 0) + 1);
-    prints += m.prints.length;
-    okp += m.prints.filter((p) => p.result === 'ok').length;
   }
+  const items = printItems();
+  const runs = items.reduce((a, it) => a + it.runs.length, 0);
+  const okRuns = items.reduce((a, it) => a + it.n.ok, 0);
   const cnt = (fn) => models.filter(fn).length;
-  const views = [
-    ['all', 'כל המודלים', I.all, models.length],
-    ['history', 'היסטוריית הדפסות', I.printer, models.reduce((a, m) => a + m.prints.length, 0)],
+  const pv = [
+    ['ok', 'הדפסות שהצליחו', '<span class="dot sdot ok"></span>', items.filter((it) => it.n.ok).length],
+    ['fail', 'הדפסות שנכשלו', '<span class="dot sdot fail"></span>', items.filter((it) => it.n.fail + it.n.cancel).length],
+    ['history', 'כל ההדפסות', I.printer, runs],
+  ];
+  const fv = [
+    ['all', 'כל הקבצים', I.all, models.length],
     ['fav', 'מועדפים', I.starO, cnt((m) => m.favorite)],
-    ['ok', 'הדפסות שהצליחו', '<span class="dot sdot ok"></span>', cnt((m) => M.hasOk(m))],
-    ['fail', 'הדפסות שנכשלו', '<span class="dot sdot fail"></span>', cnt((m) => M.hasFail(m))],
-    ['never', 'אין הדפסה רשומה', '<span class="dot sdot never"></span>', cnt((m) => M.status(m) === 'never')],
+    ['never', 'עוד לא הודפסו', '<span class="dot sdot never"></span>', cnt((m) => M.status(m) === 'never')],
     ['versions', 'עם כמה גרסאות', I.merge, cnt((m) => m.versions.length > 1)],
   ];
-  if ((S.unmatched || []).length) views.splice(5, 0, ['inbox', 'הדפסות לא משויכות', I.printer, S.unmatched.length]);
+  const nav = ([k, l, ic, c]) => `<button class="nav-item ${S.view === k && !S.tag && S.folder == null ? 'active' : ''}" data-nav="view" data-val="${k}">${ic}<span class="lbl">${l}</span><span class="count">${c}</span></button>`;
   const folderList = [...folders.entries()].sort((a, b) => a[0].localeCompare(b[0], 'he'));
+  const fname = (d) => (d === '@archive' ? '☁ ארכיון' : d.startsWith('@archive/') ? '☁ ' + d.slice(9) : d || 'תיקייה ראשית');
   $('#side').innerHTML = `
     <div class="stats">
-      <div class="stat"><b>${models.length}</b><span>מודלים</span></div>
-      <div class="stat"><b>${prints ? Math.round((okp / prints) * 100) + '%' : '–'}</b><span>הצלחה · ${prints} הדפסות</span></div>
+      <div class="stat"><b>${runs}</b><span>הדפסות</span></div>
+      <div class="stat"><b>${runs ? Math.round((okRuns / runs) * 100) + '%' : '–'}</b><span>הצליחו</span></div>
     </div>
-    <h4>תצוגה</h4>
-    ${views.map(([k, l, ic, c]) => `<button class="nav-item ${S.view === k && !S.tag && !S.folder ? 'active' : ''}" data-nav="view" data-val="${k}">${ic}<span class="lbl">${l}</span><span class="count">${c}</span></button>`).join('')}
-    <button class="nav-item" data-printer style="margin-top:6px">${I.printer}<span class="lbl">חיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
-    <h4>תגיות</h4>
-    ${tags.size ? [...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'he')).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('') : '<div class="hint" style="margin:4px 8px">עוד אין תגיות. פתח מודל והוסף תגית.</div>'}
-    ${folderList.length > 1 ? `<h4>תיקיות</h4>${folderList.map(([d, c]) => `<button class="nav-item ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(d || 'תיקייה ראשית')}</span><span class="count">${c}</span></button>`).join('')}` : ''}
+    <h4>הדפסות</h4>
+    ${pv.map(nav).join('')}
+    <button class="nav-item" data-printer style="margin-top:2px">${I.printer}<span class="lbl">חיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
+    <h4>תיקייה</h4>
+    ${fv.map(nav).join('')}
+    ${folderList.length > 1 ? folderList.map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}
+    ${tags.size ? `<h4>תגיות</h4>${[...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'he')).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('')}` : ''}
   `;
 }
+
+/* ================= print items (from Bambu, independent of local files) ================= */
+// one item = one thing that was printed (name + plate), with every run of it
+function printItems() {
+  const D = lib.data;
+  const imp = D.imported || {};
+  const items = new Map();
+  const runKeys = new Set();
+  const get = (key, init) => { let it = items.get(key); if (!it) { it = { key, runs: [], n: { ok: 0, fail: 0, cancel: 0, partial: 0 }, ...init }; items.set(key, it); } return it; };
+  const add = (it, run) => { it.runs.push(run); it.n[run.result] = (it.n[run.result] || 0) + 1; };
+  for (const e of (S.sync && S.sync.prints) || []) {
+    if (!e || !e.key || e.result === 'running') continue;
+    const mid = imp[e.key] && imp[e.key] !== 'ignored' ? imp[e.key] : null;
+    const m = mid && D.models[mid];
+    const mp = m && m.prints.find((p) => p.key === e.key || (e.aliasKeys || []).includes(p.key));
+    if (mp) runKeys.add(mp.id);
+    const plate = (mp && +mp.plateNo) || e.plate || 0;
+    const generic = isGeneric(e.title);
+    // show Bambu's name for the print (the project title, or the MakerWorld design when the title is just a profile)
+    const name = (!generic && e.title) || e.design || (m && m.name) || e.title;
+    const key = (m ? 'm:' + m.id : 't:' + norm(name) + '|' + norm(e.design)) + '#' + plate;
+    // second line: the design when the name is the project title, or the profile name when the name is the design
+    const sub = name === e.design ? (e.title && e.title !== e.design ? e.title : '') : e.design && norm(e.design) !== norm(name) ? e.design : '';
+    const it = get(key, { model: m || null, plate, name, design: sub });
+    add(it, {
+      result: mp ? mp.result : entryResult(e) === 'unknown' ? 'partial' : entryResult(e),
+      t: Date.parse(e.start || '') || 0, minutes: e.minutes, grams: e.grams, filaments: e.filaments || [], printer: e.printer,
+      coverFile: e.coverFile || '', cover: e.cover || '', title: e.title, source: e.source, entry: e, notes: mp ? mp.notes : '',
+    });
+  }
+  // prints logged by hand (not from Bambu)
+  for (const m of Object.values(D.models)) for (const p of m.prints) {
+    if (p.key || runKeys.has(p.id)) continue;
+    const plate = +p.plateNo || 0;
+    const it = get('m:' + m.id + '#' + plate, { model: m, plate, name: m.name, design: '' });
+    add(it, { result: p.result, t: Date.parse(p.at || '') || Date.parse(p.date || '') || 0, minutes: p.minutes, grams: p.grams, filaments: p.material ? [{ type: p.material, color: p.color }] : [], printer: p.printer || '', coverFile: '', title: m.name, source: 'manual', notes: p.notes });
+  }
+  const platesPerBase = new Map();
+  for (const it of items.values()) { const b = it.key.slice(0, it.key.lastIndexOf('#')); platesPerBase.set(b, (platesPerBase.get(b) || 0) + 1); }
+  for (const it of items.values()) {
+    it.multiPlate = it.plate > 1 || platesPerBase.get(it.key.slice(0, it.key.lastIndexOf('#'))) > 1 || (it.model && platesOf(it.model).length > 1);
+    it.runs.sort((a, b) => b.t - a.t);
+    it.last = it.runs[0];
+    it.lastOk = it.runs.find((r) => r.result === 'ok');
+    it.lastFail = it.runs.find((r) => r.result === 'fail' || r.result === 'cancel' || r.result === 'partial');
+    it.cover = (it.runs.find((r) => r.coverFile) || {}).coverFile || '';
+  }
+  return [...items.values()];
+}
+
+const coverCache = new Map();
+async function coverURL(file) {
+  if (!file) return null;
+  if (coverCache.has(file)) return coverCache.get(file);
+  try {
+    const dir = await lib.meta.getDirectoryHandle('covers');
+    const f = await (await dir.getFileHandle(file.replace(/^covers\//, ''))).getFile();
+    const url = URL.createObjectURL(await toBlob(f, /\.webp$/.test(file) ? 'image/webp' : /\.jpg$/.test(file) ? 'image/jpeg' : 'image/png'));
+    coverCache.set(file, url);
+    return url;
+  } catch { coverCache.set(file, null); return null; }
+}
+
+function itemFileBadge(it) {
+  if (!it.model) return '<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>';
+  const p = M.cur(it.model).path;
+  return p.startsWith('@archive/') ? '<span class="badge" title="הקובץ בארכיון בענן">☁ ארכיון</span>' : '<span class="badge" title="הקובץ בתיקייה">📁</span>';
+}
+
+function itemCardHTML(it, kind) {
+  const run = kind === 'ok' ? it.lastOk : kind === 'fail' ? it.lastFail : it.last;
+  const count = kind === 'ok' ? it.n.ok : kind === 'fail' ? it.n.fail + it.n.cancel + it.n.partial : it.runs.length;
+  const path = it.model ? M.cur(it.model).path : '';
+  const local = it.model ? (it.plate && platesOf(it.model).length > 1 ? lib.thumbURLs.get(path + '#' + it.plate) : lib.thumbURLs.get(path)) : null;
+  const cached = coverCache.get(it.cover);
+  const url = cached || local;
+  const when = (t) => { try { return new Date(t).toLocaleDateString('he-IL', { day: 'numeric', month: 'short' }); } catch { return ''; } };
+  return `<div class="card" data-item="${esc(it.key)}">
+    <div class="thumbwrap"><div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
+    <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${itemFileBadge(it)}</div>
+    <div class="body">
+      <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
+      ${it.design ? `<div class="sub" style="margin-top:0">${esc(it.design)}</div>` : ''}
+      <div class="sub"><span class="st"><span class="sdot ${run.result}"></span>${RESULT[run.result] || ''} · ${when(run.t)}${run.minutes ? ' · ' + fmtDur(run.minutes * 60) : ''}</span></div>
+    </div>
+  </div>`;
+}
+
+function renderItems(kind) {
+  const q = S.q.trim().toLowerCase();
+  let list = printItems().filter((it) => (kind === 'ok' ? it.n.ok : it.n.fail + it.n.cancel + it.n.partial));
+  if (q) list = list.filter((it) => (it.name + ' ' + it.design + ' ' + (it.model ? it.model.tags.join(' ') : '')).toLowerCase().includes(q));
+  const at = (it) => (kind === 'ok' ? it.lastOk : it.lastFail).t;
+  list.sort((a, b) => at(b) - at(a));
+  S.items = new Map(list.map((it) => [it.key, it]));
+  const g = $('#grid');
+  if (!list.length) {
+    g.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>${kind === 'ok' ? 'עוד אין הדפסות שהצליחו' : 'אין הדפסות שנכשלו'}</b>${S.sync ? '' : 'התחבר ל-Bambu ב„חיבור למדפסת” כדי לייבא את היסטוריית ההדפסות.'}</div>`;
+    return;
+  }
+  g.innerHTML = list.map((it) => itemCardHTML(it, kind)).join('');
+  for (const el of $$('[data-cover]', g)) coverURL(el.dataset.cover).then((u) => { if (u) el.innerHTML = `<img src="${u}" alt="" loading="lazy">`; });
+  for (const it of list) if (it.model && !it.cover) { const p = M.cur(it.model).path; if (M.rec(p).thumb) refreshThumb(p); }
+}
+
+function openItem(key) {
+  const it = S.items && S.items.get(key);
+  if (!it) return;
+  if (it.model) { S.openPlate = it.plate || 0; S.tab = 'prints'; openModal(it.model.id); return; }
+  itemDialog(it);
+}
+
+async function itemDialog(it) {
+  const d = document.createElement('div');
+  d.className = 'dialog';
+  const u = await coverURL(it.cover);
+  const r0 = it.last;
+  const fil = (r) => (r.filaments || []).map((f) => `<span class="fil">${f.color ? `<span class="swatch" style="background:${esc(f.color)}"></span>` : ''}<span>${esc(f.type || '')}</span>${f.grams ? `<span class="ltr" style="color:var(--ink3)">${f.grams}g</span>` : ''}</span>`).join('');
+  const when = (t) => { try { return new Date(t).toLocaleString('he-IL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  d.innerHTML = `<div class="box wide item-box">
+    <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">${esc(it.name)}${it.plate && it.multiPlate ? ` <span class="badge accent">פלטה ${it.plate}</span>` : ''}</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
+    ${it.design ? `<div class="hint" style="margin:2px 0 8px">${esc(it.design)}</div>` : ''}
+    <div class="item-top">
+      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}</div>
+      <dl class="kv">
+        <dt>הדפסות</dt><dd>${it.runs.length} · ${it.n.ok} הצליחו${it.n.fail ? ` · ${it.n.fail} נכשלו` : ''}${it.n.cancel ? ` · ${it.n.cancel} בוטלו` : ''}</dd>
+        ${r0.printer ? `<dt>מדפסת</dt><dd>${esc(r0.printer)}</dd>` : ''}
+        ${r0.filaments && r0.filaments.length ? `<dt>פילמנט</dt><dd>${fil(r0)}</dd>` : ''}
+        ${r0.minutes ? `<dt>זמן</dt><dd>${fmtDur(r0.minutes * 60)}</dd>` : ''}
+        ${r0.grams ? `<dt>משקל</dt><dd>${r0.grams} g</dd>` : ''}
+        <dt>קובץ</dt><dd>אין קובץ מתאים בתיקייה <button class="btn small" data-link>שייך לקובץ…</button></dd>
+      </dl>
+    </div>
+    <div class="section-title">כל ההדפסות</div>
+    ${it.runs.map((r) => `<div class="print-item"><div class="ph"><span class="pill ${r.result}">${RESULT[r.result] || r.result}</span><span class="when">${when(r.t)}</span>${r.minutes ? `<span style="color:var(--ink3);font-size:12.5px">${fmtDur(r.minutes * 60)}</span>` : ''}</div>${r.title && r.title !== it.name ? `<div class="meta">${esc(r.title)}</div>` : ''}</div>`).join('')}
+  </div>`;
+  d.addEventListener('click', async (e) => {
+    if (e.target === d || e.target.closest('[data-close]')) { d.remove(); return; }
+    if (e.target.closest('[data-link]')) {
+      const m = await pickModel(it.runs[0].entry || { title: it.name, design: it.design });
+      if (!m) return;
+      lib.data.imported = lib.data.imported || {};
+      for (const r of it.runs) if (r.entry && !lib.data.imported[r.entry.key]) attach(lib, m, r.entry);
+      const alias = it.runs[0].entry && (isGeneric(it.runs[0].entry.title) ? it.runs[0].entry.design : it.runs[0].entry.title);
+      if (alias) { m.aliases = m.aliases || []; if (!m.aliases.some((a) => norm(a) === norm(alias))) m.aliases.push(alias); }
+      const r = importPrints(lib, S.sync);
+      S.unmatched = r.unmatched;
+      lib.save();
+      d.remove();
+      toast(`שויך ל„${m.name}”`);
+      renderAll();
+    }
+  });
+  document.body.appendChild(d);
+}
+
 
 /* ================= toolbar + grid ================= */
 function filtered() {
@@ -778,8 +985,6 @@ function filtered() {
   const terms = q ? q.split(/\s+/) : [];
   let list = M.list().filter((m) => {
     if (S.view === 'fav' && !m.favorite) return false;
-    if (S.view === 'ok' && !M.hasOk(m)) return false;
-    if (S.view === 'fail' && !M.hasFail(m)) return false;
     if (S.view === 'never' && M.status(m) !== 'never') return false;
     if (S.view === 'versions' && m.versions.length < 2) return false;
     if (S.tag && !m.tags.includes(S.tag)) return false;
@@ -804,15 +1009,17 @@ function filtered() {
 function renderToolbar() {
   const inbox = S.view === 'inbox' && !S.tag && S.folder == null;
   const hist = S.view === 'history' && !S.tag && S.folder == null;
-  const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : filtered().length;
-  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל המודלים', fav: 'מועדפים', ok: 'הדפסות שהצליחו', fail: 'הדפסות שנכשלו', never: 'אין הדפסה רשומה', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'היסטוריית הדפסות' }[S.view];
+  const itemsView = (S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null;
+  const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : itemsView ? printItems().filter((it) => (S.view === 'ok' ? it.n.ok : it.n.fail + it.n.cancel + it.n.partial)).length : filtered().length;
+  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל הקבצים', fav: 'מועדפים', ok: 'הדפסות שהצליחו', fail: 'הדפסות שנכשלו', never: 'עוד לא הודפסו', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'כל ההדפסות' }[S.view];
   $('#toolbar').innerHTML = `
-    <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : 'מודלים'}</span>
-    ${S.tag || S.folder != null || S.q || S.view !== 'all' ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
+    <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : itemsView ? 'פריטים' : 'קבצים'}</span>
+    ${S.tag || S.folder != null || S.q ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
     <span id="prog" class="progress"></span>
+    ${native && S.archiveDir && S.view === 'ok' && itemsView && toArchive().length ? `<button class="btn small" data-archiveall title="מעביר לארכיון את הקבצים של כל מה שהצליח">☁ העבר לארכיון (${toArchive().length})</button>` : ''}
     <span class="spacer" style="flex:1"></span>
-    ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
-    ${hist ? '' : `<select class="sel" id="sort">
+    ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist && !itemsView ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
+    ${hist || itemsView ? '' : `<select class="sel" id="sort">
       <option value="recent" ${S.sort === 'recent' ? 'selected' : ''}>עודכן לאחרונה</option>
       <option value="printed" ${S.sort === 'printed' ? 'selected' : ''}>הדפסה אחרונה ביומן</option>
       <option value="name" ${S.sort === 'name' ? 'selected' : ''}>שם</option>
@@ -893,33 +1100,37 @@ function gridEntries(list) {
 function historyRows() {
   const q = S.q.trim().toLowerCase();
   const rows = [];
-  for (const m of M.list()) for (const p of m.prints) rows.push({ m, p, t: Date.parse(p.at || '') || Date.parse(p.date || '') || 0 });
-  return rows.filter((r) => !q || (r.m.name + ' ' + (r.p.notes || '') + ' ' + (r.p.material || '')).toLowerCase().includes(q)).sort((a, b) => b.t - a.t);
+  for (const it of printItems()) for (const r of it.runs) rows.push({ it, r, t: r.t });
+  return rows.filter(({ it }) => !q || (it.name + ' ' + it.design).toLowerCase().includes(q)).sort((a, b) => b.t - a.t);
 }
 function renderHistory() {
   const rows = historyRows();
+  S.items = new Map(rows.map(({ it }) => [it.key, it]));
   const g = $('#grid');
-  const un = (S.unmatched || []).length;
-  const when = (r) => { try { return new Date(r.t).toLocaleString('he-IL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return fmtDate(r.p.date); } };
-  g.innerHTML = `<div class="inbox" style="grid-column:1/-1">
-    ${un ? `<div class="inbox-head"><div class="hint" style="margin:0;flex:1">יש עוד ${un} הדפסות מ-Bambu שלא שויכו לקובץ בתיקייה.</div><span data-hmodel=""><button class="btn small" data-goinbox>הצג</button></span></div>` : ''}
-    ${rows.length ? rows.map(({ m, p, t }) => {
-      const path = M.cur(m).path;
-      const u = (p.plateNo && lib.thumbURLs.get(path + '#' + p.plateNo)) || lib.thumbURLs.get(path);
-      return `<div class="irow" data-hmodel="${m.id}" data-hplate="${p.plateNo || ''}" style="cursor:pointer">
-        ${u ? `<img class="icover" src="${u}" alt="" style="object-fit:contain">` : `<div class="icover" ${p.plateNo ? `data-pthumb="${esc(path + '#' + p.plateNo)}"` : `data-thumb="${esc(path)}"`}></div>`}
-        <div class="ii"><div class="it">${esc(m.name)}${p.plateNo ? ` <span class="badge accent">פלטה ${esc(p.plateNo)}</span>` : ''}</div>
-          <div class="isub">${[when({ t, p }), p.printer, p.minutes ? fmtDur(p.minutes * 60) : '', p.grams ? p.grams + ' g' : '', p.material, p.source === 'cloud' ? 'מהענן' : p.source ? 'מהמדפסת' : 'ידני'].filter(Boolean).map(esc).join(' · ')}</div></div>
-        <span class="pill ${p.result}">${RESULT[p.result] || p.result}</span>
+  const when = (t) => { try { return new Date(t).toLocaleString('he-IL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  g.innerHTML = `<div class="inbox hist" style="grid-column:1/-1">
+    ${rows.length ? rows.slice(0, 600).map(({ it, r }) => {
+      const path = it.model ? M.cur(it.model).path : '';
+      const cached = coverCache.get(r.coverFile || it.cover);
+      const local = path && ((it.plate && lib.thumbURLs.get(path + '#' + it.plate)) || lib.thumbURLs.get(path));
+      const u = cached || local;
+      return `<div class="irow" data-item="${esc(it.key)}" style="cursor:pointer">
+        ${u ? `<img class="icover" src="${u}" alt="" style="object-fit:contain">` : `<div class="icover" ${r.coverFile || it.cover ? `data-cover="${esc(r.coverFile || it.cover)}"` : path ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}></div>`}
+        <div class="ii"><div class="it">${esc(it.name)}${it.plate && it.multiPlate ? ` <span class="badge accent">פלטה ${it.plate}</span>` : ''} ${itemFileBadge(it)}</div>
+          <div class="isub">${[when(r.t), r.printer, r.minutes ? fmtDur(r.minutes * 60) : '', r.grams ? r.grams + ' g' : '', (r.filaments || []).map((f) => f.type).filter(Boolean).join(' + '), r.source === 'manual' ? 'ידני' : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
+        <span class="pill ${r.result}">${RESULT[r.result] || r.result}</span>
       </div>`;
-    }).join('') : '<div class="empty"><b>עוד אין הדפסות</b>התחבר ל-Bambu בהגדרות, או רשום הדפסה מתוך מודל.</div>'}
+    }).join('') : '<div class="empty"><b>עוד אין הדפסות</b>התחבר ל-Bambu ב„חיבור למדפסת”, או רשום הדפסה מתוך קובץ.</div>'}
   </div>`;
-  for (const { m, p } of rows.slice(0, 80)) { const path = M.cur(m).path; if (!lib.thumbURLs.has(p.plateNo ? path + '#' + p.plateNo : path)) refreshThumb(path); }
+  for (const el of $$('[data-cover]', g)) coverURL(el.dataset.cover).then((u) => { if (u) el.innerHTML = `<img src="${u}" alt="" style="width:100%;height:100%;object-fit:contain">`; });
+  const seen = new Set();
+  for (const { it } of rows.slice(0, 120)) if (it.model) { const p = M.cur(it.model).path; if (!seen.has(p)) { seen.add(p); refreshThumb(p); } }
 }
 
 function renderGrid() {
   if (S.view === 'inbox' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderInbox(); return; }
   if (S.view === 'history' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderHistory(); return; }
+  if ((S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderItems(S.view); return; }
   const list = filtered();
   const entries = gridEntries(list);
   S.visible = list.map((m) => m.id);
@@ -957,8 +1168,8 @@ function quickLog(m, result, forPlate) {
 
 function onGridClick(e) {
   if (e.target.closest('.inbox')) { onInboxClick(e); return; }
-  const hr = e.target.closest('[data-hmodel]');
-  if (hr) { if (e.target.closest('[data-goinbox]')) { S.view = 'inbox'; renderAll(); return; } S.openPlate = +hr.dataset.hplate || 0; openModal(hr.dataset.hmodel); return; }
+  const itc = e.target.closest('[data-item]');
+  if (itc) { openItem(itc.dataset.item); return; }
   const card = e.target.closest('.card');
   if (!card) return;
   const id = card.dataset.id;
@@ -1170,7 +1381,7 @@ function renderInfo() {
         <input class="name-input" id="mname" value="${esc(m.name)}" aria-label="שם המודל">
         <button class="btn icon-btn ghost" id="mfav" title="מועדף" style="color:var(--accent)">${m.favorite ? I.star : I.starO}</button>
       </div>
-      <div class="path mono" title="${esc(S.viewPath)}"><span>${esc(S.viewPath)}</span><button class="btn small ghost icon-btn" id="copypath" title="העתק נתיב" style="width:26px;height:26px">${I.copy}</button></div>
+      <div class="path mono" title="${esc(S.viewPath)}"><span>${esc(dispPath(S.viewPath))}</span><button class="btn small ghost icon-btn" id="copypath" title="העתק נתיב" style="width:26px;height:26px">${I.copy}</button></div>
     </div>
     <div class="tabs">
       <button class="tab ${S.tab === 'details' ? 'active' : ''}" data-tab="details">פרטים</button>
@@ -1222,6 +1433,7 @@ function detailsTab(m) {
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn small" id="dl">${I.download}הורד עותק</button>
       <button class="btn small" id="logprint">${I.plus}רשום הדפסה</button>
+      ${native && S.archiveDir && !M.cur(m).path.startsWith('@archive/') ? `<button class="btn small" id="toarchive">☁ העבר לארכיון</button>` : ''}
     </div>`;
 }
 
@@ -1302,7 +1514,7 @@ function versionsTab(m) {
         ${url ? `<img src="${url}" alt="">` : `<div class="vt" data-thumb="${esc(v.path)}"></div>`}
         <div class="vi">
           <div class="vn">v${i + 1}${v.path === M.cur(m).path ? '<span class="badge accent">נוכחית</span>' : ''}${rec.missing ? '<span class="badge" style="color:var(--fail)">חסר</span>' : ''}${prints.length ? `<span class="badge">${ok}/${prints.length} הצליחו</span>` : ''}</div>
-          <div class="vp mono" title="${esc(v.path)}">${esc(v.path)} · ${rec.size ? fmtBytes(rec.size) : ''} · ${rec.mtime ? fmtDate(rec.mtime) : ''}</div>
+          <div class="vp mono" title="${esc(v.path)}">${esc(dispPath(v.path))} · ${rec.size ? fmtBytes(rec.size) : ''} · ${rec.mtime ? fmtDate(rec.mtime) : ''}</div>
           <input data-vnote="${esc(v.path)}" value="${esc(v.note || '')}" placeholder="מה השתנה בגרסה הזו?">
         </div>
         <div class="va">
@@ -1324,6 +1536,7 @@ function bindInfo(m) {
     const rm = t.closest('[data-rmtag]');
     if (rm) { m.tags = m.tags.filter((x) => x !== rm.dataset.rmtag); M.touch(m); renderInfo(); return; }
     if (t.closest('#dl')) { downloadFile(S.viewPath); return; }
+    if (t.closest('#toarchive')) { archiveModels([m]); return; }
     if (t.closest('#logprint') || t.closest('#newprint')) { startPrintForm(m); return; }
     const ep = t.closest('[data-editprint]');
     if (ep) { const p = m.prints.find((x) => x.id === ep.dataset.editprint); S.printForm = { ...p }; S.tab = 'prints'; S.scrollReset = true; renderInfo(); return; }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shelf Sync - print-history helper for "Model Shelf" (המדף) (the STL/3MF library page).
+Shelf Sync - print-history helper for PrintLog (the STL/3MF library page).
 
 Brings your Bambu Lab print history into the library, two ways (like the
 Home Assistant Bambu Lab integration):

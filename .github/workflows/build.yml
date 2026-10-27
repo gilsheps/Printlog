@@ -49,7 +49,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v6
         with:
-          name: ModelShelf-${{ matrix.label }}
+          name: PrintLog-${{ matrix.label }}
           path: |
             release/*.dmg
             release/*.exe
@@ -75,5 +75,5 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" out/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Model Shelf $TAG" --generate-notes
+            gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrintLog $TAG" --generate-notes
           fi

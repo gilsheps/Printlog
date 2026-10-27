@@ -421,9 +421,37 @@ class Engine {
       const e = taskToEntry(t, printers);
       if (e && out.addPrint(e)) { n++; if (!first && known.size && Date.now() - (parseT(e.end) || 0) < 3 * 3600000) recent.push(e); }
     }
+    await this.cacheCovers(cfg.library);
     out.setHelper({ lastSync: nowIso(), lastError: '', needsLogin: false, cloudTasks: tasks.length });
     if (this.getConfig().options?.notify !== false) recent.forEach((e) => this.notify(e));
     return n;
+  }
+
+  // keep a local copy of Bambu's cover image for every print (the links expire, and it works offline)
+  async cacheCovers(library) {
+    const out = this.out;
+    if (!out) return;
+    const dir = path.join(library, '.shelf', 'covers');
+    const todo = out.data.prints.filter((p) => p.cover && !p.coverFile && !(p.coverTries >= 3));
+    if (!todo.length) return;
+    fs.mkdirSync(dir, { recursive: true });
+    let ok = 0;
+    for (let i = 0; i < todo.length; i += 6) {
+      await Promise.all(todo.slice(i, i + 6).map(async (p) => {
+        try {
+          const r = await fetch(p.cover, { signal: AbortSignal.timeout(20000) });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const type = r.headers.get('content-type') || '';
+          const ext = /webp/.test(type) ? 'webp' : /jpe?g/.test(type) ? 'jpg' : 'png';
+          const name = `${p.key.replace(/[^\w-]/g, '_')}.${ext}`;
+          fs.writeFileSync(path.join(dir, name), Buffer.from(await r.arrayBuffer()));
+          p.coverFile = 'covers/' + name;
+          ok++;
+        } catch (e) { p.coverTries = (p.coverTries || 0) + 1; }
+      }));
+    }
+    this.log(`covers: ${ok}/${todo.length} saved`);
+    out.write();
   }
 
   async refreshDevices() {

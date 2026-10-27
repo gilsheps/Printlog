@@ -27,7 +27,7 @@ export async function readSyncFile(lib) {
 
 // Bambu "titles" that are really print-profile names ("0.2mm layer, 2 walls, 15% infill")
 const GENERIC = /(\d+(\.\d+)?\s*mm\s*(layer|层高))|\bwalls?\b|\binfill\b|填充|层墙|^standard settings$|^v\s*\d+(\.\d+)*\s*$|^plate\s*\d+$|^untitled$/i;
-const isGeneric = (t) => !t || GENERIC.test(String(t).trim());
+export const isGeneric = (t) => !t || GENERIC.test(String(t).trim());
 const baseKey = (path) => norm(baseName(path).replace(/\(\d+\)(?=\.[^.]+$|\.gcode\.3mf$)/i, ''));
 
 function buildIndex(lib) {

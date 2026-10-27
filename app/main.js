@@ -4,8 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const { Engine, discover } = require('./engine');
 
-// Keep this name stable: settings (incl. the Bambu sign-in) live in a folder named after it,
-// so updates and reinstalls keep them.
+// Internal name stays 'Model Shelf' on purpose: settings and the encrypted Bambu sign-in are
+// stored under it, so renaming the app (now PrintLog) keeps them. Shown name comes from productName.
 app.setName('Model Shelf');
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
@@ -40,9 +40,12 @@ const saveCfg = (c) => { CFG = c; writeCfg(c); };
 
 /* ---------------- file access, confined to the library folder */
 function resolveRel(rel) {
-  const root = cfg().library;
+  rel = String(rel || '');
+  let root = cfg().library;
+  // '@archive/…' = the cloud archive folder (e.g. inside Google Drive)
+  if (rel === '@archive' || rel.startsWith('@archive/')) { root = cfg().options.archiveDir; rel = rel.slice(8); }
   if (!root) throw new Error('no library');
-  const p = path.resolve(root, ...String(rel || '').split('/').filter(Boolean));
+  const p = path.resolve(root, ...rel.split('/').filter(Boolean));
   if (p !== root && !p.startsWith(root + path.sep)) throw new Error('outside library');
   return p;
 }
@@ -65,6 +68,37 @@ ipcMain.handle('fs:write', async (_e, rel, data) => {
   await fs.promises.rename(tmp, p);
 });
 ipcMain.handle('fs:mkdir', async (_e, rel) => { await fs.promises.mkdir(resolveRel(rel), { recursive: true }); });
+const inside = (a, b) => a === b || a.startsWith(b + path.sep);
+ipcMain.handle('archive:pick', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'בחר תיקיית ארכיון (מומלץ: בתוך Google Drive)', properties: ['openDirectory', 'createDirectory'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const dir = path.resolve(r.filePaths[0]);
+  const c = cfg();
+  if (c.library && (inside(dir, c.library) || inside(c.library, dir))) return { error: 'תיקיית הארכיון לא יכולה להיות בתוך תיקיית המודלים (או להכיל אותה)' };
+  c.options.archiveDir = dir;
+  saveCfg(c);
+  return { path: dir };
+});
+ipcMain.handle('archive:clear', () => { const c = cfg(); delete c.options.archiveDir; saveCfg(c); return true; });
+// move a file from the models folder into the archive, keeping its sub-folder
+ipcMain.handle('archive:move', async (_e, rel) => {
+  if (!cfg().options.archiveDir) throw new Error('לא נבחרה תיקיית ארכיון');
+  if (String(rel).startsWith('@archive')) return rel;
+  const src = resolveRel(rel);
+  const dst = resolveRel('@archive/' + rel);
+  await fs.promises.mkdir(path.dirname(dst), { recursive: true });
+  let target = dst;
+  for (let i = 2; fs.existsSync(target); i++) target = dst.replace(/(\.gcode\.3mf|\.[^.]+)$/i, ` (${i})$1`);
+  try { await fs.promises.rename(src, target); }
+  catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    await fs.promises.copyFile(src, target);
+    const a = await fs.promises.stat(src), b = await fs.promises.stat(target);
+    if (a.size !== b.size) throw new Error('ההעתקה לארכיון לא הושלמה');
+    await fs.promises.unlink(src);
+  }
+  return '@archive/' + path.relative(cfg().options.archiveDir, target).split(path.sep).join('/');
+});
 ipcMain.handle('fs:remove', async (_e, rel) => {
   const p = resolveRel(rel);
   // only the app's own data folder may be deleted from - never the user's models
@@ -86,7 +120,7 @@ ipcMain.handle('lib:pick', async () => {
 const publicState = () => {
   const c = cfg();
   return {
-    version: app.getVersion(), platform: process.platform, library: c.library || '', mode: c.mode,
+    version: app.getVersion(), platform: process.platform, library: c.library || '', mode: c.mode, archiveDir: c.options.archiveDir || '',
     cloud: c.cloud ? { email: c.cloud.email, region: c.cloud.region, loggedIn: !!c.cloud.token } : null,
     printers: c.printers.map((p) => ({ serial: p.serial, name: p.name, model: p.model, ip: p.ip || '', access_code: p.access_code || '' })),
     options: { ...c.options, closeToTray: !!c.options.closeToTray },
@@ -138,7 +172,7 @@ ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/github\.com\//.test(ur
 function iconPath(name) { return path.join(__dirname, 'assets', name); }
 function createWindow(show = true) {
   win = new BrowserWindow({
-    width: 1360, height: 880, minWidth: 720, minHeight: 520, show: false, title: 'המדף · Model Shelf',
+    width: 1360, height: 880, minWidth: 720, minHeight: 520, show: false, title: 'PrintLog',
     backgroundColor: '#141413', icon: iconPath('icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
@@ -154,7 +188,7 @@ function createWindow(show = true) {
     win.hide();
     if (process.platform === 'darwin') app.dock?.hide();
     if (!c.options.closeHintShown && Notification.isSupported()) {
-      new Notification({ title: 'המדף ממשיך לרוץ ברקע', body: process.platform === 'darwin' ? 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: ⌘Q, או מהאייקון בשורת התפריטים ← יציאה.' : 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: האייקון במגש ← יציאה.' }).show();
+      new Notification({ title: 'PrintLog ממשיך לרוץ ברקע', body: process.platform === 'darwin' ? 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: ⌘Q, או מהאייקון בשורת התפריטים ← יציאה.' : 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: האייקון במגש ← יציאה.' }).show();
       c.options.closeHintShown = true;
       saveCfg(c);
     }
@@ -180,9 +214,9 @@ function printerSummary() {
 function updateTray() {
   if (!tray) return;
   const s = printerSummary();
-  tray.setToolTip(s ? `המדף · ${s}` : 'המדף');
+  tray.setToolTip(s ? `PrintLog · ${s}` : 'PrintLog');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'פתח את המדף', click: showWindow },
+    { label: 'פתח את PrintLog', click: showWindow },
     ...(s ? [{ label: s, enabled: false }] : []),
     { type: 'separator' },
     { label: 'סנכרן עכשיו', enabled: cfg().mode === 'cloud' || cfg().mode === 'both', click: () => engine.loopHistory(false) },
@@ -206,6 +240,13 @@ app.on('before-quit', () => { quitting = true; engine && engine.stop(); });
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: 'PrintLog', submenu: [{ role: 'about', label: 'אודות PrintLog' }, { type: 'separator' }, { role: 'hide', label: 'הסתר את PrintLog' }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit', label: 'צא מ-PrintLog' }] },
+      { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+    ]));
+    app.setAboutPanelOptions({ applicationName: 'PrintLog', applicationVersion: app.getVersion() });
+  }
   engine = new Engine({
     getConfig: () => cfg(),
     saveConfig: saveCfg,

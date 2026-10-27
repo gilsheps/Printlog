@@ -1,7 +1,7 @@
 {
   "name": "model-shelf",
-  "version": "1.0.7",
-  "description": "ספריית מודלים להדפסת תלת-ממד (STL / 3MF) עם יומן הדפסות מ-Bambu Lab",
+  "version": "1.1.0",
+  "description": "PrintLog – יומן הדפסות תלת-ממד מ-Bambu Lab, עם ספריית STL / 3MF",
   "main": "app/main.js",
   "scripts": {
     "build": "node build.mjs",
@@ -20,11 +20,11 @@
     "fflate": "^0.8.2",
     "three": "^0.169.0"
   },
-  "productName": "Model Shelf",
+  "productName": "PrintLog",
   "private": true,
   "build": {
     "appId": "com.gilsheps.modelshelf",
-    "productName": "Model Shelf",
+    "productName": "PrintLog",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -40,12 +40,12 @@
       ],
       "icon": "build/icon.png",
       "identity": "-",
-      "artifactName": "ModelShelf-${version}-mac-${arch}.${ext}",
+      "artifactName": "PrintLog-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "Model Shelf ${version}"
+      "title": "PrintLog ${version}"
     },
     "win": {
       "target": [
@@ -57,20 +57,20 @@
         }
       ],
       "icon": "build/icon.png",
-      "artifactName": "ModelShelf-${version}-windows-setup.${ext}"
+      "artifactName": "PrintLog-${version}-windows-setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "shortcutName": "Model Shelf"
+      "shortcutName": "PrintLog"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
       "category": "Utility",
-      "artifactName": "ModelShelf-${version}-linux.${ext}"
+      "artifactName": "PrintLog-${version}-linux.${ext}"
     }
   },
   "repository": {

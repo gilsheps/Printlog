@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('shelfNative', {
     mkdir: (rel) => ipcRenderer.invoke('fs:mkdir', rel),
     remove: (rel) => ipcRenderer.invoke('fs:remove', rel),
   },
+  archive: {
+    pick: () => ipcRenderer.invoke('archive:pick'),
+    clear: () => ipcRenderer.invoke('archive:clear'),
+    move: (rel) => ipcRenderer.invoke('archive:move', rel),
+  },
   getLibrary: () => ipcRenderer.invoke('lib:get'),
   pickFolder: () => ipcRenderer.invoke('lib:pick'),
   sync: {
