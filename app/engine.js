@@ -303,26 +303,103 @@ function startMqtt({ host, port = 8883, user, password, serials, watchers, insec
 }
 
 /* ---------------------------------------------------------------- discovery */
-function discover(ms = 8000) {
+// Find Bambu printers on the local network, three ways at once:
+//  1. listen for the SSDP NOTIFY packets printers broadcast (UDP 2021/1990)
+//  2. send an SSDP M-SEARCH out of every network adapter (Windows often has VPN / Hyper-V / WSL adapters)
+//  3. scan the local /24 subnets for TCP 8883 (printer MQTT) and read the serial from its TLS certificate.
+//     Outgoing TCP works even when the firewall blocks incoming UDP (common on Windows, "Public" networks).
+function lanIfaces() {
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family !== 'IPv4' && a.family !== 4) continue;
+      if (a.internal || a.address.startsWith('169.254.')) continue;
+      out.push({ name, address: a.address, netmask: a.netmask });
+    }
+  }
+  return out;
+}
+function probeTls(ip, timeout = 1500) {
   return new Promise((resolve) => {
+    let done = false;
+    const fin = (v) => { if (done) return; done = true; try { sock.destroy(); } catch { } resolve(v); };
+    const sock = tls.connect({ host: ip, port: 8883, rejectUnauthorized: false, timeout }, () => {
+      const c = sock.getPeerCertificate() || {};
+      const cn = (c.subject && c.subject.CN) || '';
+      const issuer = JSON.stringify(c.issuer || {});
+      fin(/^[0-9A-Z]{10,20}$/.test(cn) || /bambu/i.test(issuer) ? { serial: cn, ip, issuer } : null);
+    });
+    sock.on('error', () => fin(null));
+    sock.on('timeout', () => fin(null));
+    setTimeout(() => fin(null), timeout + 500);
+  });
+}
+async function scanSubnets(ifaces, log) {
+  const hosts = new Set();
+  for (const f of ifaces) {
+    if (f.netmask !== '255.255.255.0' && !f.netmask.startsWith('255.255.')) continue;
+    const base = f.address.split('.').slice(0, 3).join('.');
+    for (let i = 1; i < 255; i++) if (`${base}.${i}` !== f.address) hosts.add(`${base}.${i}`);
+  }
+  const list = [...hosts].slice(0, 1024);
+  const found = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: 64 }, async () => {
+    while (next < list.length) { const ip = list[next++]; const r = await probeTls(ip); if (r) found.push(r); }
+  }));
+  if (log) log(`discover: scanned ${list.length} addresses for port 8883, ${found.length} printer(s)`);
+  return found;
+}
+function discover(ms = 8000, log) {
+  const ifaces = lanIfaces();
+  if (log) log(`discover: adapters ${ifaces.map((f) => `${f.name}=${f.address}`).join(', ') || 'none'}`);
+  const ssdp = new Promise((resolve) => {
     const found = new Map();
     const socks = [];
+    const onMsg = (msg, rinfo) => {
+      const txt = msg.toString('utf8');
+      if (!/bambu/i.test(txt)) return;
+      const h = {};
+      for (const line of txt.split(/\r?\n/)) { const i = line.indexOf(':'); if (i > 0) h[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim(); }
+      if (h.usn) found.set(h.usn, { serial: h.usn, ip: h.location || rinfo.address, name: h['devname.bambu.com'] || h.usn, model: h['devmodel.bambu.com'] || '' });
+    };
     for (const port of [2021, 1990]) {
       try {
         const s = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-        s.on('error', () => {});
-        s.on('message', (msg, rinfo) => {
-          const txt = msg.toString('utf8');
-          if (!/bambulab/i.test(txt)) return;
-          const h = {};
-          for (const line of txt.split(/\r?\n/)) { const i = line.indexOf(':'); if (i > 0) h[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim(); }
-          if (h.usn) found.set(h.usn, { serial: h.usn, ip: h.location || rinfo.address, name: h['devname.bambu.com'] || h.usn, model: h['devmodel.bambu.com'] || '' });
+        s.on('error', (e) => { if (log) log(`discover: udp ${port} ${e.code || e.message}`); });
+        s.on('message', onMsg);
+        s.bind(port, () => {
+          for (const f of ifaces) { try { s.addMembership('239.255.255.250', f.address); } catch { } }
+          try { s.addMembership('239.255.255.250'); } catch { }
         });
-        s.bind(port, () => { try { s.addMembership('239.255.255.250'); } catch { } });
         socks.push(s);
       } catch { }
     }
-    setTimeout(() => { socks.forEach((s) => { try { s.close(); } catch { } }); resolve([...found.values()]); }, ms);
+    // active search out of each adapter
+    const q = Buffer.from('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1990\r\nMAN: "ssdp:discover"\r\nMX: 3\r\nST: urn:bambulab-com:device:3dprinter:1\r\n\r\n');
+    for (const f of ifaces) {
+      try {
+        const s = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+        s.on('error', () => {});
+        s.on('message', onMsg);
+        s.bind(0, f.address, () => {
+          try { s.setBroadcast(true); s.setMulticastInterface(f.address); } catch { }
+          for (const [host, port] of [['239.255.255.250', 1990], ['239.255.255.250', 2021], ['255.255.255.255', 2021]]) s.send(q, port, host, () => {});
+        });
+        socks.push(s);
+      } catch { }
+    }
+    setTimeout(() => { socks.forEach((s) => { try { s.close(); } catch { } }); resolve(found); }, ms);
+  });
+  return Promise.all([ssdp, scanSubnets(ifaces, log).catch(() => [])]).then(([found, scanned]) => {
+    for (const r of scanned) {
+      const ex = [...found.values()].find((f) => f.serial === r.serial || f.ip === r.ip);
+      if (ex) { if (!ex.ip) ex.ip = r.ip; continue; }
+      found.set(r.serial || r.ip, { serial: r.serial || r.ip, ip: r.ip, name: r.serial || r.ip, model: '' });
+    }
+    const list = [...found.values()];
+    if (log) log(`discover: found ${list.map((f) => `${f.name}@${f.ip}`).join(', ') || 'nothing'}`);
+    return list;
   });
 }
 
@@ -468,9 +545,14 @@ class Engine {
   }
 
   /* --- login flow, driven by the settings screen --- */
-  async login({ email, password, region }) {
+  async login({ email, password, region, codeOnly }) {
     const cloud = new BambuCloud(region || 'global');
     try {
+      // accounts opened with Google / Apple / Facebook have no password: sign in with a code sent by email
+      if (codeOnly) {
+        if (!email) return { error: 'צריך למלא מייל' };
+        await cloud.sendEmailCode(email); this.pendingLogin = { cloud, email }; return { need: 'code' };
+      }
       const j = await cloud.loginPassword(email, password);
       if (j.accessToken) return this.finishLogin(cloud, email, j.accessToken);
       if (j.loginType === 'verifyCode') { await cloud.sendEmailCode(email); this.pendingLogin = { cloud, email }; return { need: 'code' }; }
@@ -504,4 +586,4 @@ class Engine {
   }
 }
 
-module.exports = { Engine, BambuCloud, Output, LiveWatcher, MiniMQTT, startMqtt, discover, taskToEntry, CloudError, AuthExpired };
+module.exports = { probeTls, lanIfaces, Engine, BambuCloud, Output, LiveWatcher, MiniMQTT, startMqtt, discover, taskToEntry, CloudError, AuthExpired };

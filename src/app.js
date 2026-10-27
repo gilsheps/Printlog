@@ -435,7 +435,8 @@ async function nativeSettings() {
           <div class="full"><label>מייל (או טלפון)</label><input class="inp ltr" id="lemail" value="${esc((st.cloud && st.cloud.email) || '')}" autocomplete="username"></div>
           <div class="full"><label>סיסמה (לא נשמרת)</label><input class="inp ltr" id="lpass" type="password" autocomplete="current-password"></div>
           <div><label>אזור</label><select class="inp" id="lregion"><option value="global">בינלאומי (bambulab.com)</option><option value="china" ${(st.cloud && st.cloud.region) === 'china' ? 'selected' : ''}>סין (bambulab.cn)</option></select></div>
-          <div style="align-self:end"><button class="btn primary" data-login>התחבר</button></div></div>`
+          <div style="align-self:end"><button class="btn primary" data-login>התחבר</button></div>
+          <div class="full hint" style="margin-top:2px">נרשמת ל-Bambu עם Google, Apple או Facebook ואין לך סיסמה? מלא רק מייל ו<button class="btn small" data-logincode>שלח לי קוד למייל</button></div></div>`
       : `<div class="form-grid"><div class="full"><label>${login.step === 'code' ? 'קוד שנשלח למייל' : 'קוד מאפליקציית האימות'}</label><input class="inp ltr" id="lcode" inputmode="numeric" autocomplete="one-time-code"></div>
           <div><button class="btn primary" data-verify>אמת</button> <button class="btn ghost" data-back>חזרה</button></div></div>`}
       ${login.msg ? `<div class="notice" style="margin-top:8px">${esc(login.msg)}</div>` : ''}` : ''}
@@ -477,10 +478,11 @@ async function nativeSettings() {
     const m = t.closest('[data-mode]');
     if (m) { collect(); st.mode = m.dataset.mode; draw(); return; }
     if (t.closest('[data-goinbox]')) { e.preventDefault(); box.remove(); S.view = 'inbox'; S.tag = null; S.folder = null; renderAll(); return; }
-    if (t.closest('[data-login]')) {
+    if (t.closest('[data-login]') || t.closest('[data-logincode]')) {
       collect();
-      const b = t.closest('[data-login]'); b.disabled = true; b.textContent = 'מתחבר…';
-      const r = await native.sync.login({ email: $('#lemail', box).value.trim(), password: $('#lpass', box).value, region: $('#lregion', box).value });
+      const codeOnly = !!t.closest('[data-logincode]');
+      const b = t.closest('[data-login],[data-logincode]'); b.disabled = true; b.textContent = codeOnly ? 'שולח…' : 'מתחבר…';
+      const r = await native.sync.login({ email: $('#lemail', box).value.trim(), password: codeOnly ? '' : $('#lpass', box).value, region: $('#lregion', box).value, codeOnly });
       login = r.ok ? { step: 'form', msg: '' } : r.need ? { step: r.need, msg: r.need === 'code' ? 'שלחנו קוד למייל שלך' : '' } : { step: 'form', msg: r.error || 'ההתחברות נכשלה' };
       if (login.msg === 'שלחנו קוד למייל שלך') { toast(login.msg); login.msg = ''; }
       if (r.ok) { await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…'); }
@@ -499,13 +501,13 @@ async function nativeSettings() {
     if (t.closest('[data-syncnow]')) { native.sync.syncNow(); toast('מסנכרן…'); return; }
     if (t.closest('[data-discover]')) {
       collect();
-      const b = t.closest('[data-discover]'); b.disabled = true; b.textContent = 'מחפש (8 שניות)…';
+      const b = t.closest('[data-discover]'); b.disabled = true; b.textContent = 'מחפש ברשת…';
       const found = await native.sync.discover();
       for (const f of found) {
         const ex = printers.find((p) => p.serial === f.serial);
         if (ex) ex.ip = f.ip; else printers.push({ serial: f.serial, name: f.name, model: f.model, ip: f.ip, access_code: '' });
       }
-      toast(found.length ? `נמצאו ${found.length} מדפסות` : 'לא נמצאו מדפסות ברשת. אפשר להוסיף ידנית.', !found.length);
+      toast(found.length ? `נמצאו ${found.length} מדפסות` : 'לא נמצאה מדפסת ברשת. בדוק שהמחשב והמדפסת באותה רשת, או הכנס ידנית את ה-IP מהמסך של המדפסת (הגדרות → רשת).', !found.length);
       draw();
       return;
     }

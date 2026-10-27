@@ -214,7 +214,7 @@ ipcMain.handle('sync:setConfig', (_e, patch) => {
 ipcMain.handle('sync:login', (_e, a) => engine.login(a));
 ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
-ipcMain.handle('sync:discover', () => discover());
+ipcMain.handle('sync:discover', () => discover(8000, (m) => engine && engine.log(m)));
 ipcMain.handle('sync:now', async () => {
   const c = cfg();
   if (!c.cloud?.token || !(c.mode === 'cloud' || c.mode === 'both')) return { ok: false, skipped: true };
