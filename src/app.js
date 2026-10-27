@@ -329,6 +329,7 @@ function printerDialog() {
 const archiveOn = () => !!((S.gdrive && S.gdrive.connected) || S.archiveDir);
 // strip Electron's "Error invoking remote method 'x': Error: " wrapper
 const cleanErr = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+const hasLocal = (m) => m.versions.some((v) => !isArchived(v.path) && !M.rec(v.path).missing);
 function toArchive() { return M.list().filter((m) => M.hasOk(m) && m.versions.some((v) => !isArchived(v.path) && !M.rec(v.path).missing)); }
 async function archiveModels(models) {
   const useDrive = S.gdrive && S.gdrive.connected;
@@ -970,9 +971,11 @@ function itemCardHTML(it, kind) {
   const cached = coverCache.get(it.cover);
   const url = cached || local;
   const when = (t) => { try { return new Date(t).toLocaleDateString('he-IL', { day: 'numeric', month: 'short' }); } catch { return ''; } };
-  return `<div class="card" data-item="${esc(it.key)}">
+  const sel = it.model && S.selected.has(it.model.id);
+  return `<div class="card ${sel ? 'selected' : ''}" data-item="${esc(it.key)}" ${it.model ? `data-id="${it.model.id}"` : ''}>
     <div class="thumbwrap"><div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
     <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${itemFileBadge(it)}</div>
+    ${it.model ? `<div class="check" data-check title="בחר">${I.check}</div>` : ''}
     <div class="body">
       <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
       ${it.design ? `<div class="sub" style="margin-top:0">${esc(it.design)}</div>` : ''}
@@ -993,6 +996,8 @@ function renderItems(kind) {
     g.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>${kind === 'ok' ? 'עוד אין הדפסות שהצליחו' : 'אין הדפסות שנכשלו'}</b>${S.sync ? '' : 'התחבר ל-Bambu ב„חיבור למדפסת” כדי לייבא את היסטוריית ההדפסות.'}</div>`;
     return;
   }
+  S.visible = [...new Set(list.filter((it) => it.model).map((it) => it.model.id))];
+  g.classList.toggle('selecting', S.selected.size > 0);
   g.innerHTML = list.map((it) => itemCardHTML(it, kind)).join('');
   for (const el of $$('[data-cover]', g)) coverURL(el.dataset.cover).then((u) => { if (u) el.innerHTML = `<img src="${u}" alt="" loading="lazy">`; });
   for (const it of list) if (it.model && !it.cover) { const p = M.cur(it.model).path; if (M.rec(p).thumb) refreshThumb(p); }
@@ -1201,7 +1206,7 @@ function renderHistory() {
 function renderGrid() {
   if (S.view === 'inbox' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderInbox(); return; }
   if (S.view === 'history' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderHistory(); return; }
-  if ((S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderItems(S.view); return; }
+  if ((S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null) { renderItems(S.view); return; }
   const list = filtered();
   const entries = gridEntries(list);
   S.visible = list.map((m) => m.id);
@@ -1240,11 +1245,13 @@ function quickLog(m, result, forPlate) {
 function onGridClick(e) {
   if (e.target.closest('.inbox')) { onInboxClick(e); return; }
   const itc = e.target.closest('[data-item]');
-  if (itc) { openItem(itc.dataset.item); return; }
   const card = e.target.closest('.card');
   if (!card) return;
   const id = card.dataset.id;
-  if (e.target.closest('[data-check]') || e.metaKey || e.ctrlKey || e.shiftKey || S.selected.size) {
+  const selecting = id && (e.target.closest('[data-check]') || e.metaKey || e.ctrlKey || e.shiftKey || S.selected.size);
+  if (itc && !selecting) { openItem(itc.dataset.item); return; }
+  if (!id) return;
+  if (selecting) {
     if (e.shiftKey && S.lastSel && S.visible) {
       const a = S.visible.indexOf(S.lastSel), b = S.visible.indexOf(id);
       if (a >= 0 && b >= 0) for (let i = Math.min(a, b); i <= Math.max(a, b); i++) S.selected.add(S.visible[i]);
@@ -1267,6 +1274,8 @@ function renderBulk() {
     <button class="btn small" data-b="tag">${I.tag}הוסף תגית</button>
     ${n > 1 ? `<button class="btn small" data-b="merge">${I.merge}אחד לגרסאות של מודל אחד</button>` : ''}
     <button class="btn small" data-b="fav">${I.starO}מועדף</button>
+    ${native && archiveOn() ? (() => { const ms = [...S.selected].map((i) => lib.data.models[i]).filter(Boolean); const up = ms.filter(hasLocal).length, down = ms.filter((m) => m.versions.some((v) => v.path.startsWith('@gdrive/'))).length;
+      return `${up ? `<button class="btn small primary" data-b="archive">☁ העלה ל-Drive (${up})</button>` : ''}${down ? `<button class="btn small" data-b="restore">החזר מ-Drive (${down})</button>` : ''}`; })() : ''}
     <button class="btn small ghost" data-b="clear">${I.close}</button></div>`;
   $('#bulk').onclick = async (e) => {
     const b = e.target.closest('[data-b]');
@@ -1274,6 +1283,8 @@ function renderBulk() {
     const ids = [...S.selected];
     const models = ids.map((i) => lib.data.models[i]).filter(Boolean);
     if (b.dataset.b === 'clear') S.selected.clear();
+    if (b.dataset.b === 'archive') { S.selected.clear(); renderBulk(); await archiveModels(models.filter(hasLocal)); }
+    if (b.dataset.b === 'restore') { S.selected.clear(); renderBulk(); for (const m of models) if (m.versions.some((v) => v.path.startsWith('@gdrive/'))) await restoreModel(m); }
     if (b.dataset.b === 'fav') { const on = !models.every((m) => m.favorite); models.forEach((m) => { m.favorite = on; M.touch(m); }); }
     if (b.dataset.b === 'tag') {
       const t = await promptTag();

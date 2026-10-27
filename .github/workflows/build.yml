@@ -91,12 +91,12 @@ jobs:
             gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrintLog $TAG" --generate-notes
           fi
       # Public copy of the release, so installed apps can see and download updates
-      # (needs the RELEASES_TOKEN secret: a token with write access to gilsheps/printlog-releases)
+      # (needs the RELEASES_TOKEN secret: a token with write access to gilsheps/gilsheps-printlog-releases)
       - name: Publish to the public releases repo
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.ver.outputs.tag }}
-          PUB: gilsheps/printlog-releases
+          PUB: gilsheps/gilsheps-printlog-releases
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::warning::RELEASES_TOKEN not set, skipping the public releases repo"; exit 0; fi
           git log -1 --format=%B > notes.txt

@@ -223,7 +223,7 @@ ipcMain.handle('sync:now', async () => {
 });
 
 /* ---------------- updates: compare with the latest GitHub Release ---------------- */
-const RELEASES = 'https://api.github.com/repos/gilsheps/printlog-releases/releases/latest'; // public copy of the releases
+const RELEASES = 'https://api.github.com/repos/gilsheps/gilsheps-printlog-releases/releases/latest'; // public copy of the releases
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 ipcMain.handle('app:checkUpdate', async () => {
   try {
@@ -242,7 +242,7 @@ ipcMain.handle('app:checkUpdate', async () => {
 // download the new version from the GitHub release and install it
 ipcMain.handle('app:installUpdate', async (_e, url) => {
   try {
-    if (!/^https:\/\/github\.com\/gilsheps\/(printlog-releases|model-shelf)\/releases\/download\//.test(url)) throw new Error('כתובת עדכון לא מוכרת');
+    if (!/^https:\/\/github\.com\/gilsheps\/(gilsheps-printlog-releases|model-shelf)\/releases\/download\//.test(url)) throw new Error('כתובת עדכון לא מוכרת');
     const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'printlog-update-'));
     const file = path.join(dir, decodeURIComponent(url.split('/').pop()));
     const r = await fetch(url, { headers: { 'User-Agent': 'PrintLog' }, signal: AbortSignal.timeout(15 * 60 * 1000) });
