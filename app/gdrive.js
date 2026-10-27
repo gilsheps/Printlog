@@ -13,6 +13,8 @@ const TOKEN = TB ? TB + '/token' : 'https://oauth2.googleapis.com/token';
 const API = TB ? TB + '/drive/v3' : 'https://www.googleapis.com/drive/v3';
 const UPLOAD = TB ? TB + '/upload/drive/v3' : 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_NAME = 'PrintLog Archive';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const NO_SCOPE_MSG = 'Google לא נתנו ל-PrintLog הרשאה לקבצים ב-Drive. בחלון ההתחברות של Google צריך לסמן את התיבה של Google Drive ("לראות, לערוך, ליצור ולמחוק רק את הקבצים הספציפיים…"). התחבר שוב בהגדרות וסמן אותה.';
 
 function loadClient(dir) {
   // from the build (GitHub secret) or a local oauth.json next to the app
@@ -54,13 +56,18 @@ class GDrive {
         port = srv.address().port;
         const q = new URLSearchParams({
           client_id: this.client.client_id, redirect_uri: `http://127.0.0.1:${port}`, response_type: 'code', scope: SCOPE,
-          code_challenge: challenge, code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent', state,
+          code_challenge: challenge, code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state,
         });
         this.openExternal(`${AUTH}?${q}`);
       });
     });
     const tok = await this.tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier });
     if (!tok.refresh_token) throw new Error('Google לא החזירו אישור קבוע. נסה שוב.');
+    // Google lets the user untick individual permissions on the consent screen
+    if (tok.scope && !tok.scope.split(' ').includes(DRIVE_SCOPE)) {
+      fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(tok.refresh_token), { method: 'POST' }).catch(() => {});
+      throw new Error(NO_SCOPE_MSG);
+    }
     let email = '';
     try { email = JSON.parse(Buffer.from(tok.id_token.split('.')[1], 'base64url').toString()).email || ''; } catch { }
     this.access = { token: tok.access_token, exp: Date.now() + (tok.expires_in - 60) * 1000 };
@@ -96,6 +103,11 @@ class GDrive {
       const t = await this.token();
       const r = await fetch(url, { method, headers: { Authorization: `Bearer ${t}`, ...(json ? { 'Content-Type': 'application/json; charset=UTF-8' } : {}), ...headers }, body: json ? JSON.stringify(json) : body, signal: AbortSignal.timeout(10 * 60 * 1000) });
       if (r.status === 401 && attempt === 0) { this.access = null; continue; }
+      if (r.status === 403) {
+        const txt = await r.text();
+        if (/insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/i.test(txt)) { this.access = null; this.setAuth(null); throw new Error(NO_SCOPE_MSG); }
+        throw new Error(`Google Drive: 403 ${txt.slice(0, 200)}`);
+      }
       if ((r.status === 429 || r.status >= 500) && attempt < 2) { await new Promise((s) => setTimeout(s, 1500 * (attempt + 1))); continue; }
       if (!r.ok) throw new Error(`Google Drive: ${r.status} ${(await r.text()).slice(0, 200)}`);
       return raw ? r : r.status === 204 ? null : r.json();

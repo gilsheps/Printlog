@@ -327,6 +327,8 @@ function printerDialog() {
 /* ---------- desktop app: cloud archive ---------- */
 // models that printed successfully but still have files in the working folder
 const archiveOn = () => !!((S.gdrive && S.gdrive.connected) || S.archiveDir);
+// strip Electron's "Error invoking remote method 'x': Error: " wrapper
+const cleanErr = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 function toArchive() { return M.list().filter((m) => M.hasOk(m) && m.versions.some((v) => !isArchived(v.path) && !M.rec(v.path).missing)); }
 async function archiveModels(models) {
   const useDrive = S.gdrive && S.gdrive.connected;
@@ -351,10 +353,12 @@ async function archiveModels(models) {
       v.path = np;
       done++;
       lib.save();
-    } catch (e) { failed++; lastErr = e.message; console.warn(e); }
+    } catch (e) { failed++; lastErr = cleanErr(e); console.warn(e); if (/הרשאה/.test(lastErr)) break; }
   }
+  if (useDrive) { try { S.gdrive = await native.gdrive.status(); } catch { } renderToolbar(); }
   setProgress(null);
   lib.save(true);
+  if (failed && /הרשאה/.test(lastErr)) toast(lastErr, true); else
   toast(failed ? `${done} קבצים הועברו, ${failed} נכשלו: ${lastErr}` : `${done} קבצים הועברו לארכיון ופינו ${fmtBytes(size)}`, !!failed);
   if (S.open) closeModal();
   await rescan(false);
@@ -452,7 +456,7 @@ async function nativeSettings() {
     ${!gd || !gd.available ? `<div class="hint">בגרסה הזו לא מוגדר מפתח Google, ולכן הארכיון לא זמין.</div>`
       : gd.connected ? `<div class="acct"><span>מחובר בתור <b class="ltr">${esc(gd.email || '')}</b> · הקבצים נשמרים בתיקייה <b>PrintLog Archive</b></span><button class="btn small ghost danger" data-gdout>התנתק</button></div>`
       : `<div class="acct"><span>לא מחובר</span><button class="btn small primary" data-gdin>התחבר ל-Google Drive</button></div>`}
-    <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
+    <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. בחלון של Google חשוב לסמן את התיבה של Google Drive. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
     ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
     <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
