@@ -362,6 +362,11 @@ class Engine {
     this.log(`engine start: mode=${cfg.mode} printers=${(cfg.printers || []).map((p) => `${p.name}[${p.ip ? 'ip' : '-'}${p.access_code ? '+code' : ''}]`).join(' ')} cloud=${cfg.cloud?.token ? 'yes' : 'no'}`);
     out.setHelper({ lastError: '', needsLogin: false, stopped: null });
     const printers = cfg.printers || [];
+    // no printers saved yet (or the sign-in happened before they were fetched): ask the cloud for them
+    if (!printers.length && cfg.cloud?.token && !this.fetchingDevices) {
+      this.fetchingDevices = true;
+      this.refreshDevices().then((n) => { this.fetchingDevices = false; if (n) this.start(); }).catch((e) => { this.fetchingDevices = false; this.log(`devices: ${e.message}`); });
+    }
     const onPrint = (e) => { if (cfg.options?.notify !== false) this.notify(e); };
     // live status: straight from the printer on the LAN when we have its IP + access code,
     // otherwise through Bambu Cloud (like the Home Assistant integration)
@@ -415,6 +420,19 @@ class Engine {
     out.setHelper({ lastSync: nowIso(), lastError: '', needsLogin: false, cloudTasks: tasks.length });
     if (this.getConfig().options?.notify !== false) recent.forEach((e) => this.notify(e));
     return n;
+  }
+
+  async refreshDevices() {
+    const cfg = this.getConfig();
+    const cloud = new BambuCloud(cfg.cloud.region, cfg.cloud.token);
+    const list = await cloud.devices();
+    const byS = Object.fromEntries((cfg.printers || []).map((p) => [p.serial, p]));
+    for (const d of list) byS[d.dev_id] = { ...(byS[d.dev_id] || {}), serial: d.dev_id, name: d.name || d.dev_id, model: d.dev_product_name || d.dev_model_name || '', access_code: d.dev_access_code || byS[d.dev_id]?.access_code || '' };
+    if (!cfg.cloud.user) cfg.cloud.user = await cloud.userId();
+    cfg.printers = Object.values(byS);
+    this.saveConfig(cfg);
+    this.log(`devices: ${list.length} from the account (${cfg.printers.map((p) => p.name).join(', ')})`);
+    return list.length;
   }
 
   /* --- login flow, driven by the settings screen --- */
