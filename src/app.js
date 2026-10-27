@@ -98,6 +98,7 @@ const M = {
   },
   lastPrint: (m) => m.prints.reduce((a, p) => (p.date > a ? p.date : a), ''),
   mtime: (m) => Math.max(...m.versions.map((v) => M.rec(v.path).mtime || 0)),
+  activity: (m) => Math.max(M.mtime(m), ...m.prints.map((p) => Date.parse(p.at || p.date || '') || 0)),
   touch(m) { m.updated = new Date().toISOString(); lib.save(); },
 };
 
@@ -745,6 +746,7 @@ function renderSidebar() {
   const cnt = (fn) => models.filter(fn).length;
   const views = [
     ['all', 'כל המודלים', I.all, models.length],
+    ['history', 'היסטוריית הדפסות', I.printer, models.reduce((a, m) => a + m.prints.length, 0)],
     ['fav', 'מועדפים', I.starO, cnt((m) => m.favorite)],
     ['ok', 'ההדפסה האחרונה הצליחה', '<span class="dot sdot ok"></span>', cnt((m) => M.status(m) === 'ok')],
     ['fail', 'ההדפסה האחרונה נכשלה', '<span class="dot sdot fail"></span>', cnt((m) => ['fail', 'partial'].includes(M.status(m)))],
@@ -787,7 +789,8 @@ function filtered() {
     return true;
   });
   const by = {
-    recent: (a, b) => M.mtime(b) - M.mtime(a),
+    // last activity: the file changed or the model was printed, whichever is newer
+    recent: (a, b) => M.activity(b) - M.activity(a),
     name: (a, b) => a.name.localeCompare(b.name, 'he'),
     printed: (a, b) => (M.lastPrint(b) || '').localeCompare(M.lastPrint(a) || '') || M.mtime(b) - M.mtime(a),
     size: (a, b) => (M.rec(M.cur(b).path).size || 0) - (M.rec(M.cur(a).path).size || 0),
@@ -797,20 +800,21 @@ function filtered() {
 
 function renderToolbar() {
   const inbox = S.view === 'inbox' && !S.tag && S.folder == null;
-  const n = inbox ? (S.unmatched || []).length : filtered().length;
-  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל המודלים', fav: 'מועדפים', ok: 'הודפסו בהצלחה', fail: 'נכשלו', never: 'אין הדפסה רשומה', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות' }[S.view];
+  const hist = S.view === 'history' && !S.tag && S.folder == null;
+  const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : filtered().length;
+  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל המודלים', fav: 'מועדפים', ok: 'הודפסו בהצלחה', fail: 'נכשלו', never: 'אין הדפסה רשומה', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'היסטוריית הדפסות' }[S.view];
   $('#toolbar').innerHTML = `
-    <span class="title">${esc(title)}</span><span>${n} ${inbox ? 'הדפסות' : 'מודלים'}</span>
+    <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : 'מודלים'}</span>
     ${S.tag || S.folder != null || S.q || S.view !== 'all' ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
     <span id="prog" class="progress"></span>
     <span class="spacer" style="flex:1"></span>
-    ${M.list().some((m) => platesOf(m).length > 1) && !(S.view === 'inbox' && !S.tag && S.folder == null) ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
-    <select class="sel" id="sort">
+    ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
+    ${hist ? '' : `<select class="sel" id="sort">
       <option value="recent" ${S.sort === 'recent' ? 'selected' : ''}>עודכן לאחרונה</option>
       <option value="printed" ${S.sort === 'printed' ? 'selected' : ''}>הדפסה אחרונה ביומן</option>
       <option value="name" ${S.sort === 'name' ? 'selected' : ''}>שם</option>
       <option value="size" ${S.sort === 'size' ? 'selected' : ''}>גודל קובץ</option>
-    </select>`;
+    </select>`}`;
   if (S.progress) setProgress(S.progress.label, S.progress.frac);
 }
 
@@ -881,8 +885,37 @@ function gridEntries(list) {
   return out;
 }
 
+/* ---------- print history (newest first, like Bambu Studio's Print History) ---------- */
+function historyRows() {
+  const q = S.q.trim().toLowerCase();
+  const rows = [];
+  for (const m of M.list()) for (const p of m.prints) rows.push({ m, p, t: Date.parse(p.at || '') || Date.parse(p.date || '') || 0 });
+  return rows.filter((r) => !q || (r.m.name + ' ' + (r.p.notes || '') + ' ' + (r.p.material || '')).toLowerCase().includes(q)).sort((a, b) => b.t - a.t);
+}
+function renderHistory() {
+  const rows = historyRows();
+  const g = $('#grid');
+  const un = (S.unmatched || []).length;
+  const when = (r) => { try { return new Date(r.t).toLocaleString('he-IL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return fmtDate(r.p.date); } };
+  g.innerHTML = `<div class="inbox" style="grid-column:1/-1">
+    ${un ? `<div class="inbox-head"><div class="hint" style="margin:0;flex:1">יש עוד ${un} הדפסות מ-Bambu שלא שויכו לקובץ בתיקייה.</div><span data-hmodel=""><button class="btn small" data-goinbox>הצג</button></span></div>` : ''}
+    ${rows.length ? rows.map(({ m, p, t }) => {
+      const path = M.cur(m).path;
+      const u = (p.plateNo && lib.thumbURLs.get(path + '#' + p.plateNo)) || lib.thumbURLs.get(path);
+      return `<div class="irow" data-hmodel="${m.id}" data-hplate="${p.plateNo || ''}" style="cursor:pointer">
+        ${u ? `<img class="icover" src="${u}" alt="" style="object-fit:contain">` : `<div class="icover" ${p.plateNo ? `data-pthumb="${esc(path + '#' + p.plateNo)}"` : `data-thumb="${esc(path)}"`}></div>`}
+        <div class="ii"><div class="it">${esc(m.name)}${p.plateNo ? ` <span class="badge accent">פלטה ${esc(p.plateNo)}</span>` : ''}</div>
+          <div class="isub">${[when({ t, p }), p.printer, p.minutes ? fmtDur(p.minutes * 60) : '', p.grams ? p.grams + ' g' : '', p.material, p.source === 'cloud' ? 'מהענן' : p.source ? 'מהמדפסת' : 'ידני'].filter(Boolean).map(esc).join(' · ')}</div></div>
+        <span class="pill ${p.result}">${RESULT[p.result] || p.result}</span>
+      </div>`;
+    }).join('') : '<div class="empty"><b>עוד אין הדפסות</b>התחבר ל-Bambu בהגדרות, או רשום הדפסה מתוך מודל.</div>'}
+  </div>`;
+  for (const { m, p } of rows.slice(0, 80)) { const path = M.cur(m).path; if (!lib.thumbURLs.has(p.plateNo ? path + '#' + p.plateNo : path)) refreshThumb(path); }
+}
+
 function renderGrid() {
   if (S.view === 'inbox' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderInbox(); return; }
+  if (S.view === 'history' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderHistory(); return; }
   const list = filtered();
   const entries = gridEntries(list);
   S.visible = list.map((m) => m.id);
@@ -920,6 +953,8 @@ function quickLog(m, result, forPlate) {
 
 function onGridClick(e) {
   if (e.target.closest('.inbox')) { onInboxClick(e); return; }
+  const hr = e.target.closest('[data-hmodel]');
+  if (hr) { if (e.target.closest('[data-goinbox]')) { S.view = 'inbox'; renderAll(); return; } S.openPlate = +hr.dataset.hplate || 0; openModal(hr.dataset.hmodel); return; }
   const card = e.target.closest('.card');
   if (!card) return;
   const id = card.dataset.id;
