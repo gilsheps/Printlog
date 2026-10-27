@@ -1,6 +1,6 @@
 {
   "name": "model-shelf",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "ספריית מודלים להדפסת תלת-ממד (STL / 3MF) עם יומן הדפסות מ-Bambu Lab",
   "main": "app/main.js",
   "scripts": {

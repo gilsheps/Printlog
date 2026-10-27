@@ -98,6 +98,8 @@ const M = {
   },
   lastPrint: (m) => m.prints.reduce((a, p) => (p.date > a ? p.date : a), ''),
   mtime: (m) => Math.max(...m.versions.map((v) => M.rec(v.path).mtime || 0)),
+  hasOk: (m) => m.prints.some((p) => p.result === 'ok'),
+  hasFail: (m) => m.prints.some((p) => p.result === 'fail' || p.result === 'partial'),
   activity: (m) => Math.max(M.mtime(m), ...m.prints.map((p) => Date.parse(p.at || p.date || '') || 0)),
   touch(m) { m.updated = new Date().toISOString(); lib.save(); },
 };
@@ -156,6 +158,7 @@ async function openLibrary(dir) {
   lib = new Library(dir);
   try { await lib.init(); } catch (e) { toast('שגיאה בפתיחת הספרייה: ' + e.message, true); return; }
   lib.on((t, e) => { if (t === 'save-error') toast('השמירה נכשלה: ' + (e && e.message), true); });
+  if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view;
   renderShell();
   await rescan(true);
   if (S.bound) return;
@@ -672,7 +675,7 @@ function renderShell() {
     const b = e.target.closest('[data-nav]');
     if (!b) return;
     const [kind, val] = [b.dataset.nav, b.dataset.val];
-    if (kind === 'view') { S.view = val; S.tag = null; S.folder = null; }
+    if (kind === 'view') { S.view = val; S.tag = null; S.folder = null; lib.data.prefs = { ...(lib.data.prefs || {}), view: val }; lib.save(); }
     if (kind === 'tag') { S.tag = S.tag === val ? null : val; }
     if (kind === 'folder') { S.folder = S.folder === val ? null : val; }
     renderAll();
@@ -748,8 +751,8 @@ function renderSidebar() {
     ['all', 'כל המודלים', I.all, models.length],
     ['history', 'היסטוריית הדפסות', I.printer, models.reduce((a, m) => a + m.prints.length, 0)],
     ['fav', 'מועדפים', I.starO, cnt((m) => m.favorite)],
-    ['ok', 'ההדפסה האחרונה הצליחה', '<span class="dot sdot ok"></span>', cnt((m) => M.status(m) === 'ok')],
-    ['fail', 'ההדפסה האחרונה נכשלה', '<span class="dot sdot fail"></span>', cnt((m) => ['fail', 'partial'].includes(M.status(m)))],
+    ['ok', 'הדפסות שהצליחו', '<span class="dot sdot ok"></span>', cnt((m) => M.hasOk(m))],
+    ['fail', 'הדפסות שנכשלו', '<span class="dot sdot fail"></span>', cnt((m) => M.hasFail(m))],
     ['never', 'אין הדפסה רשומה', '<span class="dot sdot never"></span>', cnt((m) => M.status(m) === 'never')],
     ['versions', 'עם כמה גרסאות', I.merge, cnt((m) => m.versions.length > 1)],
   ];
@@ -775,8 +778,8 @@ function filtered() {
   const terms = q ? q.split(/\s+/) : [];
   let list = M.list().filter((m) => {
     if (S.view === 'fav' && !m.favorite) return false;
-    if (S.view === 'ok' && M.status(m) !== 'ok') return false;
-    if (S.view === 'fail' && !['fail', 'partial'].includes(M.status(m))) return false;
+    if (S.view === 'ok' && !M.hasOk(m)) return false;
+    if (S.view === 'fail' && !M.hasFail(m)) return false;
     if (S.view === 'never' && M.status(m) !== 'never') return false;
     if (S.view === 'versions' && m.versions.length < 2) return false;
     if (S.tag && !m.tags.includes(S.tag)) return false;
@@ -802,7 +805,7 @@ function renderToolbar() {
   const inbox = S.view === 'inbox' && !S.tag && S.folder == null;
   const hist = S.view === 'history' && !S.tag && S.folder == null;
   const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : filtered().length;
-  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל המודלים', fav: 'מועדפים', ok: 'הודפסו בהצלחה', fail: 'נכשלו', never: 'אין הדפסה רשומה', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'היסטוריית הדפסות' }[S.view];
+  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל המודלים', fav: 'מועדפים', ok: 'הדפסות שהצליחו', fail: 'הדפסות שנכשלו', never: 'אין הדפסה רשומה', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'היסטוריית הדפסות' }[S.view];
   $('#toolbar').innerHTML = `
     <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : 'מודלים'}</span>
     ${S.tag || S.folder != null || S.q || S.view !== 'all' ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
@@ -875,8 +878,9 @@ function gridEntries(list) {
       const pst = plateStatus(m);
       for (const p of plates) {
         const st = pst[p.id] || 'never';
-        if (S.view === 'ok' && st !== 'ok') continue;
-        if (S.view === 'fail' && !['fail', 'partial'].includes(st)) continue;
+        const pp = m.prints.filter((x) => +x.plateNo === p.id);
+        if (S.view === 'ok' && !pp.some((x) => x.result === 'ok')) continue;
+        if (S.view === 'fail' && !pp.some((x) => x.result === 'fail' || x.result === 'partial')) continue;
         if (S.view === 'never' && st !== 'never') continue;
         out.push({ m, plate: p });
       }
