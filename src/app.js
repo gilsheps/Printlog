@@ -412,7 +412,7 @@ async function checkUpdate(manual) {
     $('#toasts').appendChild(t);
     if (!manual) setTimeout(() => t.remove(), 30000);
   } else if (manual) {
-    toast(r.error === 'private' ? 'אי אפשר לבדוק עדכונים כל עוד ה-repo פרטי' : r.error ? 'בדיקת העדכונים נכשלה' : `יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
+    toast(r.error === 'private' ? 'עדיין לא פורסמו גרסאות ציבוריות' : r.error ? 'בדיקת העדכונים נכשלה' : `יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
   }
 }
 
@@ -467,7 +467,7 @@ async function nativeSettings() {
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
     <div class="section-title">ארכיון ב-Google Drive</div>
     ${!gd || !gd.available ? `<div class="hint">בגרסה הזו לא מוגדר מפתח Google, ולכן הארכיון לא זמין.</div>`
-      : gd.connected ? `<div class="acct"><span>מחובר בתור <b class="ltr">${esc(gd.email || '')}</b> · הקבצים נשמרים בתיקייה <b>PrintLog Archive</b></span><button class="btn small ghost danger" data-gdout>התנתק</button></div>`
+      : gd.connected ? `<div class="acct"><span>מחובר בתור <b class="ltr">${esc(gd.email || '')}</b> · הקבצים נשמרים בתיקייה <b>PrintLog Archive</b></span><button class="btn small" data-gdnow>☁ העלה עכשיו (${toArchive().length})</button><button class="btn small ghost danger" data-gdout>התנתק</button></div>`
       : `<div class="acct"><span>לא מחובר</span><button class="btn small primary" data-gdin>התחבר ל-Google Drive</button></div>`}
     <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. בחלון של Google חשוב לסמן את התיבה של Google Drive. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
     ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
@@ -539,6 +539,10 @@ async function nativeSettings() {
       gd = S.gdrive = await native.gdrive.status();
       draw(); renderToolbar();
       return;
+    }
+    if (t.closest('[data-gdnow]')) {
+      if (!toArchive().length) { toast('אין קבצים להעלות: כל הקבצים של הדפסות שהצליחו כבר בארכיון'); return; }
+      box.remove(); archiveModels(toArchive()); return;
     }
     if (t.closest('[data-gdout]')) { await native.gdrive.disconnect(); gd = S.gdrive = await native.gdrive.status(); draw(); renderToolbar(); return; }
     if (t.closest('[data-pickarchive]')) {
@@ -1083,7 +1087,7 @@ function renderToolbar() {
     <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : itemsView ? 'פריטים' : 'קבצים'}</span>
     ${S.tag || S.folder != null || S.q ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
     <span id="prog" class="progress"></span>
-    ${native && archiveOn() && S.view === 'ok' && itemsView && toArchive().length ? `<button class="btn small" data-archiveall title="מעביר לארכיון את הקבצים של כל מה שהצליח">☁ העבר לארכיון (${toArchive().length})</button>` : ''}
+    ${native && archiveOn() && S.view === 'ok' && itemsView ? (toArchive().length ? `<button class="btn small" data-archiveall title="מעלה ל-Drive את הקבצים של כל מה שהצליח ומוחק אותם מהמחשב">☁ העלה ל-Drive (${toArchive().length})</button>` : `<span class="btn small ghost" style="cursor:default" title="כל הקבצים של הדפסות שהצליחו כבר בארכיון">☁ הכול בארכיון</span>`) : ''}
     <span class="spacer" style="flex:1"></span>
     ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist && !itemsView ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
     ${hist || itemsView ? '' : `<select class="sel" id="sort">
