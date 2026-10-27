@@ -387,6 +387,18 @@ async function restoreModel(m) {
 }
 
 /* ---------- desktop app: updates ---------- */
+async function installUpdate(r) {
+  if (S.updating) return;
+  S.updating = true;
+  if (native.onUpdateProgress && !S.updHook) { S.updHook = 1; native.onUpdateProgress((p) => setProgress(`מוריד את גרסה ${r.latest}…`, p)); }
+  setProgress(`מוריד את גרסה ${r.latest}…`, 0);
+  const res = await native.installUpdate(r.installUrl);
+  if (res.ok) { setProgress('מתקין ומפעיל מחדש…', 1); lib.save(true); return; }
+  S.updating = false;
+  setProgress(null);
+  toast('העדכון האוטומטי נכשל: ' + res.error + '. פותח את דף ההורדה.', true);
+  native.openUrl(r.url);
+}
 async function checkUpdate(manual) {
   if (!native || !native.checkUpdate) return;
   const r = await native.checkUpdate();
@@ -395,10 +407,10 @@ async function checkUpdate(manual) {
     S.updateShown = r.latest;
     const t = document.createElement('div');
     t.className = 'toast';
-    t.innerHTML = `גרסה חדשה זמינה: ${esc(r.latest)} (יש לך ${esc(r.current)}) <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">הורד</button><div style="font-size:12px;opacity:.75;margin-top:4px">ההגדרות, החיבור ל-Bambu והספרייה נשמרים בהתקנה.</div>`;
-    $('button', t).onclick = () => { native.openUrl(r.url); t.remove(); };
+    t.innerHTML = `גרסה חדשה זמינה: ${esc(r.latest)} (יש לך ${esc(r.current)}) <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">${r.canInstall ? 'עדכן עכשיו' : 'הורד'}</button><div style="font-size:12px;opacity:.75;margin-top:4px">${r.canInstall ? 'האפליקציה תוריד את הגרסה, תיסגר ותיפתח מחדש. ' : ''}ההגדרות, החיבור ל-Bambu והספרייה נשמרים.</div>`;
+    $('button', t).onclick = () => { t.remove(); if (r.canInstall) installUpdate(r); else native.openUrl(r.url); };
     $('#toasts').appendChild(t);
-    setTimeout(() => t.remove(), 30000);
+    if (!manual) setTimeout(() => t.remove(), 30000);
   } else if (manual) {
     toast(r.error === 'private' ? 'אי אפשר לבדוק עדכונים כל עוד ה-repo פרטי' : r.error ? 'בדיקת העדכונים נכשלה' : `יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
   }

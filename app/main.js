@@ -232,9 +232,57 @@ ipcMain.handle('app:checkUpdate', async () => {
     const j = await r.json();
     const latest = String(j.tag_name || '').replace(/^v/, '');
     const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-    const asset = (j.assets || []).find((a) => process.platform === 'darwin' ? a.name.endsWith(`mac-${arch}.dmg`) : process.platform === 'win32' ? a.name.endsWith('.exe') : false);
-    return { current: app.getVersion(), latest, update: !!latest && newer(latest, app.getVersion()), url: (asset && asset.browser_download_url) || j.html_url, page: j.html_url, notes: (j.body || '').slice(0, 1500) };
+    const find = (re) => (j.assets || []).find((a) => re.test(a.name));
+    const asset = process.platform === 'darwin' ? find(new RegExp(`mac-${arch}\\.dmg$`)) : process.platform === 'win32' ? find(/\.exe$/) : null;
+    // what the app can install by itself: the mac .zip (swap the .app) or the Windows installer (silent)
+    const auto = process.platform === 'darwin' ? find(new RegExp(`mac-${arch}\\.zip$`)) : process.platform === 'win32' ? find(/\.exe$/) : null;
+    return { current: app.getVersion(), latest, update: !!latest && newer(latest, app.getVersion()), url: (asset && asset.browser_download_url) || j.html_url, page: j.html_url, notes: (j.body || '').slice(0, 1500), canInstall: !!(auto && app.isPackaged), installUrl: auto ? auto.browser_download_url : '', size: auto ? auto.size : 0 };
   } catch (e) { return { current: app.getVersion(), error: e.message }; }
+});
+// download the new version from the GitHub release and install it
+ipcMain.handle('app:installUpdate', async (_e, url) => {
+  try {
+    if (!/^https:\/\/github\.com\/gilsheps\/model-shelf\/releases\/download\//.test(url)) throw new Error('כתובת עדכון לא מוכרת');
+    const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'printlog-update-'));
+    const file = path.join(dir, decodeURIComponent(url.split('/').pop()));
+    const r = await fetch(url, { headers: { 'User-Agent': 'PrintLog' }, signal: AbortSignal.timeout(15 * 60 * 1000) });
+    if (!r.ok || !r.body) throw new Error(`ההורדה נכשלה (HTTP ${r.status})`);
+    const total = +r.headers.get('content-length') || 0;
+    const out = fs.createWriteStream(file);
+    let got = 0, last = 0;
+    for await (const chunk of r.body) {
+      got += chunk.length;
+      if (!out.write(chunk)) await new Promise((res) => out.once('drain', res));
+      if (Date.now() - last > 250) { last = Date.now(); win && win.webContents.send('update-progress', total ? got / total : null); }
+    }
+    await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));
+    if (total && got !== total) throw new Error('ההורדה לא הושלמה');
+    const { spawn, execFileSync } = require('child_process');
+    if (process.platform === 'win32') {
+      // NSIS installer: silent, same folder as now, start the app again when done
+      spawn(file, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+    } else if (process.platform === 'darwin') {
+      const appPath = path.resolve(app.getPath('exe'), '../../..'); // …/PrintLog.app
+      if (!appPath.endsWith('.app')) throw new Error('לא מצאנו את מיקום האפליקציה');
+      const ex = path.join(dir, 'x');
+      execFileSync('/usr/bin/ditto', ['-x', '-k', file, ex]);
+      const name = fs.readdirSync(ex).find((n) => n.endsWith('.app'));
+      if (!name) throw new Error('קובץ העדכון לא תקין');
+      const next = path.join(ex, name);
+      try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', next]); } catch { }
+      fs.accessSync(path.dirname(appPath), fs.constants.W_OK);
+      const sh = path.join(dir, 'swap.sh');
+      fs.writeFileSync(sh, `#!/bin/sh
+while kill -0 ${process.pid} 2>/dev/null; do sleep 0.3; done
+rm -rf "$1.old" && mv "$1" "$1.old" && /usr/bin/ditto "$2" "$1" && rm -rf "$1.old" || { rm -rf "$1"; mv "$1.old" "$1"; }
+open "$1"
+`, { mode: 0o755 });
+      spawn('/bin/sh', [sh, appPath, next], { detached: true, stdio: 'ignore' }).unref();
+    } else throw new Error('עדכון אוטומטי לא נתמך במערכת הזו');
+    quitting = true;
+    setTimeout(() => app.quit(), 300);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.code === 'EACCES' ? 'אין הרשאה להחליף את האפליקציה בתיקייה הזו' : e.message }; }
 });
 ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 
