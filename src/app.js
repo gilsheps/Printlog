@@ -32,6 +32,7 @@ const I = {
   merge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4v5a5 5 0 0 0 5 5h7M6 20v-6M15 11l3 3-3 3"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>',
   printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M9 7v6l3 3 3-3V7M7 18h10"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
 };
 
@@ -722,6 +723,7 @@ function renderShell() {
       <button class="btn ghost ppill" id="ppill" title="חיבור למדפסת"></button>
       <span class="folder-chip" title="${esc(lib.root.name)}">${I.folder}${esc(lib.root.name)}</span>
       <button class="btn icon-btn ghost" id="theme" title="מצב תצוגה">${I.theme}</button>
+      <button class="btn" id="settings" title="הגדרות">${I.gear}<span>הגדרות</span></button>
       <button class="btn" id="rescan" title="סרוק מחדש">${I.refresh}<span>רענן</span></button>
       <label class="btn primary" title="הוסף קבצים לתיקייה">${I.plus}<span>הוסף קבצים</span><input type="file" id="addfiles" accept=".stl,.3mf" multiple hidden></label>
     </header>
@@ -758,6 +760,9 @@ function renderShell() {
   $('#addfiles').onchange = (e) => { importFiles([...e.target.files]); e.target.value = ''; };
 
   $('#ppill').onclick = () => printerDialog();
+  $('#settings').onclick = () => printerDialog();
+  if (native && native.onOpenSettings) native.onOpenSettings(() => printerDialog());
+  if (!document.__settingsKey) { document.__settingsKey = 1; document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === ',' && !(native && navigator.platform.startsWith('Mac'))) { e.preventDefault(); printerDialog(); } }); }
   $('#side').addEventListener('click', (e) => {
     if (e.target.closest('[data-printer]')) { printerDialog(); return; }
     const b = e.target.closest('[data-nav]');
@@ -859,7 +864,7 @@ function renderSidebar() {
     </div>
     <h4>הדפסות</h4>
     ${pv.map(nav).join('')}
-    <button class="nav-item" data-printer style="margin-top:2px">${I.printer}<span class="lbl">חיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
+    <button class="nav-item" data-printer style="margin-top:2px">${I.printer}<span class="lbl">הגדרות וחיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
     <h4>תיקייה</h4>
     ${fv.map(nav).join('')}
     ${folderList.length > 1 ? folderList.map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}

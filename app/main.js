@@ -312,7 +312,7 @@ app.on('window-all-closed', () => { /* keep running in the tray */ });
 app.whenReady().then(() => {
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: 'PrintLog', submenu: [{ role: 'about', label: 'אודות PrintLog' }, { type: 'separator' }, { role: 'hide', label: 'הסתר את PrintLog' }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit', label: 'צא מ-PrintLog' }] },
+      { label: 'PrintLog', submenu: [{ role: 'about', label: 'אודות PrintLog' }, { type: 'separator' }, { label: 'הגדרות…', accelerator: 'CmdOrCtrl+,', click: () => { showWindow(); win.webContents.send('open-settings'); } }, { type: 'separator' }, { role: 'hide', label: 'הסתר את PrintLog' }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit', label: 'צא מ-PrintLog' }] },
       { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
     ]));
     app.setAboutPanelOptions({ applicationName: 'PrintLog', applicationVersion: app.getVersion() });
