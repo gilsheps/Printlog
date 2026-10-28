@@ -109,7 +109,20 @@ ipcMain.handle('fs:remove', async (_e, rel) => {
 });
 
 /* ---------------- library + settings */
-ipcMain.handle('lib:get', () => { const l = cfg().library; return l && fs.existsSync(l) ? { path: l, name: path.basename(l) } : null; });
+ipcMain.handle('lib:get', () => {
+  const c = cfg();
+  if (c.library) return fs.existsSync(c.library) ? { path: c.library, name: path.basename(c.library) } : null;
+  // first run: no need to pick a folder before connecting to Bambu; start with Documents/PrintLog (changeable in settings)
+  try {
+    const dir = path.join(app.getPath('documents'), 'PrintLog');
+    fs.mkdirSync(dir, { recursive: true });
+    c.library = dir;
+    if (c.mode === 'off') c.mode = 'cloud';
+    saveCfg(c);
+    engine.start();
+    return { path: dir, name: path.basename(dir), fresh: true };
+  } catch { return null; }
+});
 ipcMain.handle('lib:pick', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'בחר את תיקיית המודלים', properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return null;
@@ -215,6 +228,10 @@ ipcMain.handle('sync:login', (_e, a) => engine.login(a));
 ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
 ipcMain.handle('sync:discover', () => discover(8000, (m) => engine && engine.log(m)));
+ipcMain.handle('sync:fetchModel', async (_e, key) => {
+  try { if (!engine.out) engine.start(); return { ok: true, ...(await engine.fetchModel(key)) }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('sync:now', async () => {
   const c = cfg();
   if (!c.cloud?.token || !(c.mode === 'cloud' || c.mode === 'both')) return { ok: false, skipped: true };

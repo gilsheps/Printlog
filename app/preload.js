@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('shelfNative', {
     getState: () => ipcRenderer.invoke('sync:state'),
     setConfig: (patch) => ipcRenderer.invoke('sync:setConfig', patch),
     login: (a) => ipcRenderer.invoke('sync:login', a),
+    fetchModel: (key) => ipcRenderer.invoke('sync:fetchModel', key),
     verify: (a) => ipcRenderer.invoke('sync:verify', a),
     logout: () => ipcRenderer.invoke('sync:logout'),
     discover: () => ipcRenderer.invoke('sync:discover'),

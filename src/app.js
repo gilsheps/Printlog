@@ -117,7 +117,11 @@ async function boot() {
   }
   if (native) {
     const info = await native.getLibrary();
-    if (info && info.path) return openLibrary(new NativeDirHandle('', info.name));
+    if (info && info.path) {
+      await openLibrary(new NativeDirHandle('', info.name));
+      if (info.fresh) { toast(`הקבצים יישמרו בתיקייה ${info.path}. אפשר להחליף תיקייה בהגדרות.`); printerDialog(); }
+      return;
+    }
   }
   const supported = !!native || 'showDirectoryPicker' in window;
   const saved = !native && supported ? await kvGet('root') : null;
@@ -221,7 +225,7 @@ async function syncPrints(force) {
   renderPrinterPill();
 }
 
-const PSTATE = { running: 'מדפיס', prepare: 'מתכונן', pause: 'מושהה', finish: 'סיים', failed: 'נכשל', idle: 'פנוי', slicing: 'פורס', offline: 'לא מחובר', error: 'שגיאת חיבור', unknown: 'לא ידוע' };
+const PSTATE = { running: 'מדפיס', prepare: 'מתכונן', pause: 'מושהה', finish: 'סיים', failed: 'נכשל', idle: 'פנוי', slicing: 'פורס', offline: 'לא מחובר', error: 'שגיאת חיבור', unknown: 'לא ידוע', connecting: 'מתחבר…', silent: 'לא מגיבה (כבויה?)' };
 function helperState() {
   const d = S.sync;
   if (!d) return { kind: 'none' };
@@ -244,8 +248,10 @@ function renderPrinterPill() {
   else if (printers.length) {
     const p = printers.find((x) => ['running', 'prepare', 'pause'].includes(x.state)) || printers[0];
     const live = Date.now() - (Date.parse(p.updated || '') || 0) < 10 * 60 * 1000;
-    const state = live ? p.state : (p.conn === 'error' ? 'error' : 'offline');
-    dot = state === 'running' || state === 'prepare' ? 'run' : state === 'failed' || state === 'error' ? 'bad' : state === 'offline' ? 'off' : 'idle';
+    // no report yet: still connecting, or the printer is off / not answering
+    const quiet = !p.state || p.state === 'unknown';
+    const state = p.conn === 'error' ? 'error' : !live || p.conn === 'offline' ? 'offline' : quiet ? (Date.now() - (Date.parse(S.sync.helper?.started || '') || 0) < 90000 ? 'connecting' : 'silent') : p.state;
+    dot = state === 'running' || state === 'prepare' ? 'run' : state === 'failed' || state === 'error' ? 'bad' : state === 'offline' || state === 'silent' ? 'off' : 'idle';
     text = `${p.name || 'מדפסת'} · ${PSTATE[state] || state}${state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${['running', 'pause', 'prepare'].includes(state) && p.job ? ` · ${p.job}` : ''}`;
   } else { text = 'מסונכרן'; }
   el.className = 'btn ppill';
@@ -1015,20 +1021,22 @@ async function itemDialog(it) {
   d.className = 'dialog';
   const u = await coverURL(it.cover);
   const r0 = it.last;
+  // a cloud print can bring its own 3MF: download it and open the full 3D view
+  const cloudEnt = native && native.sync.fetchModel && S.sync && (it.runs.map((r) => r.entry).find((e) => e && /^cloud-/.test(e.key || '')) || null);
   const fil = (r) => (r.filaments || []).map((f) => `<span class="fil">${f.color ? `<span class="swatch" style="background:${esc(f.color)}"></span>` : ''}<span>${esc(f.type || '')}</span>${f.grams ? `<span class="ltr" style="color:var(--ink3)">${f.grams}g</span>` : ''}</span>`).join('');
   const when = (t) => { try { return new Date(t).toLocaleString('he-IL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   d.innerHTML = `<div class="box wide item-box">
     <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">${esc(it.name)}${it.plate && it.multiPlate ? ` <span class="badge accent">פלטה ${it.plate}</span>` : ''}</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
     ${it.design ? `<div class="hint" style="margin:2px 0 8px">${esc(it.design)}</div>` : ''}
     <div class="item-top">
-      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}</div>
+      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}${cloudEnt ? `<div class="item-fetch"><div class="spin"></div><span>מוריד את המודל מ-Bambu לתצוגה בתלת-ממד…</span></div>` : ''}</div>
       <dl class="kv">
         <dt>הדפסות</dt><dd>${it.runs.length} · ${it.n.ok} הצליחו${it.n.fail ? ` · ${it.n.fail} נכשלו` : ''}${it.n.cancel ? ` · ${it.n.cancel} בוטלו` : ''}</dd>
         ${r0.printer ? `<dt>מדפסת</dt><dd>${esc(r0.printer)}</dd>` : ''}
         ${r0.filaments && r0.filaments.length ? `<dt>פילמנט</dt><dd>${fil(r0)}</dd>` : ''}
         ${r0.minutes ? `<dt>זמן</dt><dd>${fmtDur(r0.minutes * 60)}</dd>` : ''}
         ${r0.grams ? `<dt>משקל</dt><dd>${r0.grams} g</dd>` : ''}
-        <dt>קובץ</dt><dd>אין קובץ מתאים בתיקייה <button class="btn small" data-link>שייך לקובץ…</button></dd>
+        <dt>קובץ</dt><dd><span data-fstat>${cloudEnt ? 'מוריד מ-Bambu…' : 'אין קובץ מתאים בתיקייה'}</span> <button class="btn small" data-link>שייך לקובץ…</button></dd>
       </dl>
     </div>
     <div class="section-title">כל ההדפסות</div>
@@ -1052,6 +1060,30 @@ async function itemDialog(it) {
     }
   });
   document.body.appendChild(d);
+  if (cloudEnt) fetchCloudModel(it, cloudEnt, d);
+}
+
+async function fetchCloudModel(it, ent, d) {
+  const fail = (msg) => {
+    const f = $('.item-fetch', d); if (f) f.remove();
+    const s = $('[data-fstat]', d); if (s) s.textContent = 'אין קובץ בתיקייה, ו-Bambu לא החזירו את המודל';
+    if (msg) console.warn('fetchModel', msg);
+  };
+  const r = await native.sync.fetchModel(ent.key);
+  if (!d.isConnected) return;
+  if (!r.ok) { fail(r.error); return; }
+  await rescan(false);
+  const m = M.list().find((x) => x.versions.some((v) => v.path === r.path));
+  if (!m) { fail('scan'); return; }
+  lib.data.imported = lib.data.imported || {};
+  for (const run of it.runs) if (run.entry && !lib.data.imported[run.entry.key]) attach(lib, m, run.entry);
+  const res = importPrints(lib, S.sync);
+  S.unmatched = res.unmatched;
+  lib.save();
+  d.remove();
+  renderAll();
+  S.openPlate = it.plate || 0; S.tab = 'prints';
+  openModal(m.id);
 }
 
 

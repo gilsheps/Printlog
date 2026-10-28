@@ -17,7 +17,20 @@ const API = {
   bind: 'https://api.bambulab.com/v1/iot-service/api/user/bind',
   tasks: 'https://api.bambulab.com/v1/user-service/my/tasks',
   preference: 'https://api.bambulab.com/v1/design-user-service/my/preference',
+  projects: 'https://api.bambulab.com/v1/iot-service/api/user/project',
+  instance: 'https://api.bambulab.com/v1/design-service/instance',
 };
+// find a downloadable 3MF link anywhere inside an API response
+function find3mfUrl(obj) {
+  let best = '';
+  const walk = (v, k) => {
+    if (best) return;
+    if (typeof v === 'string') { if (/^https?:\/\//.test(v) && (/\.3mf(\?|$)/i.test(v) || /^(url|file_?url|download_?url|model_?url)$/i.test(k || ''))) best = v; return; }
+    if (v && typeof v === 'object') for (const [kk, vv] of Object.entries(v)) walk(vv, kk);
+  };
+  walk(obj, '');
+  return best;
+}
 // matches Bambu Studio's Print History: 2 = Success, 3 = Canceled
 const TASK_STATUS = { 0: 'running', 1: 'running', 2: 'ok', 3: 'cancel', 4: 'fail' };
 const OUT_NAME = 'printer-sync.json';
@@ -34,7 +47,11 @@ class AuthExpired extends CloudError {}
 /* ---------------------------------------------------------------- cloud */
 class BambuCloud {
   constructor(region = 'global', token = '') { this.region = region; this.token = token; }
-  url(k) { const u = API[k]; return this.region === 'china' ? u.replace('.com', '.cn') : u; }
+  url(k) {
+    const u = API[k];
+    if (process.env.PRINTLOG_BAMBU_TEST_BASE) return u.replace(/^https:\/\/[^/]+/, process.env.PRINTLOG_BAMBU_TEST_BASE); // tests only
+    return this.region === 'china' ? u.replace('.com', '.cn') : u;
+  }
   headers(auth = true) {
     const h = {
       'User-Agent': 'bambu_network_agent/01.09.05.01', 'X-BBL-Client-Name': 'OrcaSlicer', 'X-BBL-Client-Type': 'slicer',
@@ -96,6 +113,41 @@ class BambuCloud {
     if (!json.uid) throw new CloudError('לא הצלחנו לזהות את המשתמש');
     return `u_${json.uid}`;
   }
+  // the 3MF behind a print: the cloud project it was sent from, or the MakerWorld profile
+  async modelUrl(e, log) {
+    const tried = [];
+    if (e.projectId || e.modelId) {
+      try {
+        let pid = e.projectId;
+        if (!pid) {
+          for (let page = 1; page <= 20 && !pid; page++) {
+            const { json } = await this.req('GET', `${this.url('projects')}?page=${page}&limit=50`);
+            const list = json.projects || json.hits || json.data || [];
+            if (page === 1) log(`model: projects response keys ${Object.keys(json).join(',')} (${list.length})`);
+            const hit = list.find((p) => [p.model_id, p.modelId, p.project_id, p.projectId].map(String).includes(e.modelId));
+            if (hit) pid = String(hit.project_id || hit.projectId || '');
+            if (list.length < 50) break;
+          }
+        }
+        if (pid) {
+          const { json } = await this.req('GET', `${this.url('projects')}/${pid}`);
+          const url = find3mfUrl(json);
+          log(`model: project ${pid} keys ${Object.keys(json).join(',')} -> ${url ? 'url' : 'no url'}`);
+          if (url) return { url, via: 'project' };
+        }
+        tried.push('project');
+      } catch (err) { tried.push('project:' + err.message); }
+    }
+    for (const id of [e.instanceId, e.profileId].filter((x) => x && x !== '0')) {
+      try {
+        const { json } = await this.req('GET', `${this.url('instance')}/${id}/f3mf?type=download`);
+        const url = json.url || find3mfUrl(json);
+        log(`model: makerworld instance ${id} -> ${url ? 'url' : 'no url'} (${Object.keys(json).join(',')})`);
+        if (url) return { url, via: 'makerworld', name: json.name || '' };
+      } catch (err) { tried.push(`instance ${id}:` + err.message); }
+    }
+    throw new CloudError(`Bambu לא החזירו קובץ להדפסה הזו (${tried.join('; ') || 'אין מזהה'})`);
+  }
   async devices() { return (await this.req('GET', this.url('bind'))).json.devices || []; }
   async tasks(knownIds) {
     const out = [], seen = new Set();
@@ -132,6 +184,8 @@ function taskToEntry(t, printers) {
     estMinutes: Math.round((t.costTime || 0) / 60), grams: Math.round((+t.weight || 0) * 100) / 100,
     filaments: (t.amsDetailMapping || []).map((a) => ({ type: a.filamentType || a.targetFilamentType || '', color: colorHex(a.targetColor || a.sourceColor), grams: Math.round((+a.weight || 0) * 100) / 100 })),
     bed: t.bedType || '', cover: t.cover || '', mode: t.mode || '',
+    // ids that point at the file that was printed (cloud project / MakerWorld profile)
+    modelId: String(t.modelId || ''), profileId: String(t.profileId || ''), instanceId: String(t.instanceId || ''), projectId: String(t.projectId || ''),
   };
 }
 
@@ -141,7 +195,7 @@ class Output {
     this.file = path.join(library, '.shelf', OUT_NAME);
     this.onWrite = onWrite;
     this.data = { schema: 1, helper: {}, printers: {}, prints: [] };
-    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; } catch { }
+    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; if (d.idsVer) this.data.idsVer = d.idsVer; } catch { }
     this.data.helper = { version: 'app', app: true, mode, host: os.hostname(), started: nowIso() };
     this.lastWrite = 0; this.pending = false;
   }
@@ -490,8 +544,10 @@ class Engine {
     const out = this.out;
     const cloud = new BambuCloud(cfg.cloud.region, cfg.cloud.token);
     const printers = Object.fromEntries((cfg.printers || []).map((p) => [p.serial, p]));
-    const known = out.knownCloudIds();
+    // older entries were saved without the model ids: re-read the full history once
+    const known = out.data.idsVer === 2 ? out.knownCloudIds() : new Set();
     const tasks = await cloud.tasks(known);
+    out.data.idsVer = 2;
     let n = 0;
     const recent = [];
     for (const t of tasks) {
@@ -529,6 +585,32 @@ class Engine {
     }
     this.log(`covers: ${ok}/${todo.length} saved`);
     out.write();
+  }
+
+  // download the 3MF of a print into "<library>/Bambu Cloud/" so it can be shown in 3D
+  async fetchModel(key) {
+    const cfg = this.getConfig();
+    if (!cfg.cloud || !cfg.cloud.token) throw new CloudError('צריך להתחבר ל-Bambu בהגדרות');
+    if (!this.out) throw new CloudError('הסנכרון לא פועל');
+    const e = this.out.data.prints.find((p) => p.key === key || (p.aliasKeys || []).includes(key));
+    if (!e) throw new CloudError('ההדפסה לא נמצאה');
+    const cloud = new BambuCloud(cfg.cloud.region, cfg.cloud.token);
+    const { url, name } = await cloud.modelUrl(e, (m) => this.log(m));
+    const r = await fetch(url, { signal: AbortSignal.timeout(10 * 60 * 1000) });
+    if (!r.ok) throw new CloudError(`ההורדה נכשלה (HTTP ${r.status})`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length < 100 || buf[0] !== 0x50 || buf[1] !== 0x4b) throw new CloudError('הקובץ שהתקבל הוא לא 3MF');
+    const ext = /\.gcode\.3mf(\?|$)/i.test(url) ? '.gcode.3mf' : '.3mf';
+    const base = String(name || e.design || e.title || `print-${e.key}`).replace(/\.(gcode\.)?3mf$/i, '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim().slice(0, 100) || 'model';
+    const dir = path.join(cfg.library, 'Bambu Cloud');
+    fs.mkdirSync(dir, { recursive: true });
+    let file = path.join(dir, base + ext);
+    for (let i = 2; fs.existsSync(file) && fs.statSync(file).size !== buf.length; i++) file = path.join(dir, `${base} (${i})${ext}`);
+    if (!fs.existsSync(file)) fs.writeFileSync(file, buf);
+    e.modelFile = path.relative(cfg.library, file).split(path.sep).join('/');
+    this.out.write();
+    this.log(`model: saved ${e.modelFile} (${buf.length} bytes)`);
+    return { path: e.modelFile, size: buf.length };
   }
 
   async refreshDevices() {
