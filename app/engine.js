@@ -488,6 +488,20 @@ class Engine {
     const cfg = this.getConfig();
     if (!cfg.library || !cfg.mode || cfg.mode === 'off') return;
     const out = (this.out = new Output(cfg.library, cfg.mode, this.onWrite));
+    // 1.1.9–1.1.11 saved downloaded models in a visible "Bambu Cloud" folder: move them out of sight
+    try {
+      let moved = 0;
+      for (const p of out.data.prints) {
+        if (!p.modelFile || !p.modelFile.startsWith('Bambu Cloud/')) continue;
+        const src = path.join(cfg.library, ...p.modelFile.split('/'));
+        const dstDir = path.join(cfg.library, '.shelf', 'models');
+        const dst = path.join(dstDir, path.basename(src));
+        if (fs.existsSync(src)) { fs.mkdirSync(dstDir, { recursive: true }); if (!fs.existsSync(dst)) fs.renameSync(src, dst); moved++; }
+        if (fs.existsSync(dst)) p.modelFile = '@models/' + path.basename(dst);
+      }
+      const old = path.join(cfg.library, 'Bambu Cloud');
+      if (moved) { try { if (!fs.readdirSync(old).length) fs.rmdirSync(old); } catch { } out.write(); this.log(`model: moved ${moved} downloaded model(s) to .shelf/models`); }
+    } catch (e) { this.log('model: move failed ' + e.message); }
     this.logFile = path.join(cfg.library, '.shelf', 'sync.log');
     try { fs.mkdirSync(path.dirname(this.logFile), { recursive: true }); } catch { }
     this.log(`engine start: mode=${cfg.mode} printers=${(cfg.printers || []).map((p) => `${p.name}[${p.ip ? 'ip' : '-'}${p.access_code ? '+code' : ''}]`).join(' ')} cloud=${cfg.cloud?.token ? 'yes' : 'no'}`);
@@ -602,12 +616,12 @@ class Engine {
     if (buf.length < 100 || buf[0] !== 0x50 || buf[1] !== 0x4b) throw new CloudError('הקובץ שהתקבל הוא לא 3MF');
     const ext = /\.gcode\.3mf(\?|$)/i.test(url) ? '.gcode.3mf' : '.3mf';
     const base = String(name || e.design || e.title || `print-${e.key}`).replace(/\.(gcode\.)?3mf$/i, '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim().slice(0, 100) || 'model';
-    const dir = path.join(cfg.library, 'Bambu Cloud');
+    const dir = path.join(cfg.library, '.shelf', 'models'); // hidden: downloaded once, reused every time
     fs.mkdirSync(dir, { recursive: true });
     let file = path.join(dir, base + ext);
     for (let i = 2; fs.existsSync(file) && fs.statSync(file).size !== buf.length; i++) file = path.join(dir, `${base} (${i})${ext}`);
     if (!fs.existsSync(file)) fs.writeFileSync(file, buf);
-    e.modelFile = path.relative(cfg.library, file).split(path.sep).join('/');
+    e.modelFile = '@models/' + path.basename(file);
     this.out.write();
     this.log(`model: saved ${e.modelFile} (${buf.length} bytes)`);
     return { path: e.modelFile, size: buf.length };

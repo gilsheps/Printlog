@@ -45,6 +45,8 @@ function resolveRel(rel) {
   let root = cfg().library;
   // '@archive/…' = the cloud archive folder (e.g. inside Google Drive)
   if (rel === '@archive' || rel.startsWith('@archive/')) { root = cfg().options.archiveDir; rel = rel.slice(8); }
+  // '@models/…' = models downloaded from Bambu for the 3D view, kept out of sight in the library's .shelf folder
+  else if (rel === '@models' || rel.startsWith('@models/')) { root = path.join(cfg().library, '.shelf', 'models'); rel = rel.slice(7); try { fs.mkdirSync(root, { recursive: true }); } catch { } }
   if (!root) throw new Error('no library');
   const p = path.resolve(root, ...rel.split('/').filter(Boolean));
   if (p !== root && !p.startsWith(root + path.sep)) throw new Error('outside library');

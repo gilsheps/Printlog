@@ -48,7 +48,7 @@ const fmtBytes = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Ma
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
 const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-const dispPath = (p) => (String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
+const dispPath = (p) => (String(p).startsWith('@models/') ? 'הורד מ-Bambu/' + p.slice(8) : String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
 const isArchived = (p) => /^@(archive|gdrive)\//.test(p);
 const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה', cancel: 'בוטלה' };
 // build plates of the model's current file (each plate = a separate print)
@@ -175,6 +175,7 @@ async function openLibrary(dir) {
   lib = new Library(dir);
   if (native) {
     try { const st = await native.sync.getState(); S.archiveDir = st.archiveDir || ''; if (st.archiveDir) lib.archive = new NativeDirHandle('@archive', 'ארכיון'); } catch { }
+    lib.models = new NativeDirHandle('@models', 'Bambu');
     try { S.gdrive = await native.gdrive.status(); } catch { S.gdrive = null; }
   }
   try { await lib.init(); } catch (e) { toast('שגיאה בפתיחת הספרייה: ' + e.message, true); return; }
@@ -344,11 +345,11 @@ function printerDialog() {
 const archiveOn = () => !!((S.gdrive && S.gdrive.connected) || S.archiveDir);
 // strip Electron's "Error invoking remote method 'x': Error: " wrapper
 const cleanErr = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
-const hasLocal = (m) => m.versions.some((v) => !isArchived(v.path) && !M.rec(v.path).missing);
-function toArchive() { return M.list().filter((m) => M.hasOk(m) && m.versions.some((v) => !isArchived(v.path) && !M.rec(v.path).missing)); }
+const hasLocal = (m) => m.versions.some((v) => !isArchived(v.path) && !v.path.startsWith('@models/') && !M.rec(v.path).missing);
+function toArchive() { return M.list().filter((m) => M.hasOk(m) && hasLocal(m)); }
 async function archiveModels(models) {
   const useDrive = S.gdrive && S.gdrive.connected;
-  const files = models.flatMap((m) => m.versions.filter((v) => !isArchived(v.path) && !M.rec(v.path).missing).map((v) => ({ m, v })));
+  const files = models.flatMap((m) => m.versions.filter((v) => !isArchived(v.path) && !v.path.startsWith('@models/') && !M.rec(v.path).missing).map((v) => ({ m, v })));
   const size = files.reduce((a, { v }) => a + (M.rec(v.path).size || 0), 0);
   const where = useDrive ? `לתיקייה <b>PrintLog Archive</b> ב-Google Drive (${esc(S.gdrive.email || '')})` : `לתיקייה <span class="mono">${esc(S.archiveDir)}</span>`;
   const ok = await dialog('להעביר לארכיון?', `${files.length} קבצים (${fmtBytes(size)}) יועלו ${where} ויימחקו מהמחשב אחרי שההעלאה תיבדק.<br>ההיסטוריה, התגיות וההערות נשמרות, והכרטיסים ממשיכים להופיע עם ☁ ולהיפתח בתלת-ממד.`, [{ label: 'העבר', value: true, primary: true }, { label: 'ביטול', value: false }]);
@@ -894,7 +895,7 @@ function renderSidebar() {
   ];
   const nav = ([k, l, ic, c]) => `<button class="nav-item ${S.view === k && !S.tag && S.folder == null ? 'active' : ''}" data-nav="view" data-val="${k}">${ic}<span class="lbl">${l}</span><span class="count">${c}</span></button>`;
   const folderList = [...folders.entries()].sort((a, b) => a[0].localeCompare(b[0], 'he'));
-  const fname = (d) => (d === '@archive' ? '☁ ארכיון' : d.startsWith('@archive/') ? '☁ ' + d.slice(9) : d || 'תיקייה ראשית');
+  const fname = (d) => (d === '@models' ? 'הורדו מ-Bambu' : d === '@archive' ? '☁ ארכיון' : d.startsWith('@archive/') ? '☁ ' + d.slice(9) : d || 'תיקייה ראשית');
   $('#side').innerHTML = `
     <div class="stats">
       <div class="stat"><b>${runs}</b><span>הדפסות</span></div>
@@ -975,6 +976,7 @@ async function coverURL(file) {
 function itemFileBadge(it) {
   if (!it.model) return '<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>';
   const p = M.cur(it.model).path;
+  if (p.startsWith('@models/')) return '<span class="badge" title="המודל הורד מ-Bambu ונשמר אצלך">⬇ Bambu</span>';
   return isArchived(p) ? '<span class="badge" title="הקובץ בארכיון בענן">☁ ארכיון</span>' : '<span class="badge" title="הקובץ בתיקייה">📁</span>';
 }
 

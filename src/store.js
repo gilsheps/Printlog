@@ -82,6 +82,7 @@ export class Library {
     const found = [];
     await this.walk(this.root, '', found, progress);
     if (this.archive) { try { await this.walk(this.archive, '@archive', found, progress); } catch (e) { this.emit('archive-error', e); } }
+    if (this.models) { try { await this.walk(this.models, '@models', found, progress); } catch { } }
     const infos = [];
     for (const f of found) {
       try {
@@ -174,6 +175,7 @@ export class Library {
     let parts = path.split('/');
     let dir = this.root;
     if (parts[0] === '@archive' && this.archive) { dir = this.archive; parts = parts.slice(1); }
+    else if (parts[0] === '@models' && this.models) { dir = this.models; parts = parts.slice(1); }
     for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i], { create });
     const h = await dir.getFileHandle(parts[parts.length - 1], { create });
     this.handles.set(path, h);
