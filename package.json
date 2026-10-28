@@ -1,5 +1,5 @@
 {
-  "name": "model-shelf",
+  "name": "printlog",
   "version": "1.1.11",
   "description": "PrintLog – יומן הדפסות תלת-ממד מ-Bambu Lab, עם ספריית STL / 3MF",
   "main": "app/main.js",
@@ -76,6 +76,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/gilsheps/model-shelf.git"
+    "url": "https://github.com/gilsheps/Printlog.git"
   }
 }

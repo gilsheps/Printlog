@@ -250,7 +250,7 @@ const RELEASES = 'https://api.github.com/repos/gilsheps/Printlog/releases/latest
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 ipcMain.handle('app:checkUpdate', async () => {
   try {
-    const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'model-shelf' }, signal: AbortSignal.timeout(10000) });
+    const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'PrintLog' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return { current: app.getVersion(), error: r.status === 404 ? 'private' : `HTTP ${r.status}` };
     const j = await r.json();
     const latest = String(j.tag_name || '').replace(/^v/, '');
