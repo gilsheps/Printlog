@@ -11,6 +11,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const I = {
+  cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/></svg>',
   mark: '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50.00,27.00 76.00,42.00 50.00,57.00 24.00,42.00" fill="#fff"/><polygon points="24.00,42.80 50.00,57.80 50.00,62.20 24.00,47.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,57.80 76.00,42.80 76.00,47.20 50.00,62.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,48.80 50.00,63.80 50.00,68.20 24.00,53.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,63.80 76.00,48.80 76.00,53.20 50.00,68.20" fill="#fff" fill-opacity="0.5"/><polygon points="24.00,54.80 50.00,69.80 50.00,74.20 24.00,59.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,69.80 76.00,54.80 76.00,59.20 50.00,74.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,60.80 50.00,75.80 50.00,80.20 24.00,65.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,75.80 76.00,60.80 76.00,65.20 50.00,80.20" fill="#fff" fill-opacity="0.5"/><polygon points="24.00,66.80 50.00,81.80 50.00,86.20 24.00,71.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,81.80 76.00,66.80 76.00,71.20 50.00,86.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,72.80 50.00,87.80 50.00,92.20 24.00,77.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,87.80 76.00,72.80 76.00,77.20 50.00,92.20" fill="#fff" fill-opacity="0.5"/><polygon points="41.00,11.00 59.00,11.00 54.00,20.00 46.00,20.00" fill="#1f1d1a"/><polygon points="47.80,20.00 52.20,20.00 50.00,24.50" fill="#1f1d1a"/></svg>',
   logo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 18h16M6 14h12M8 10h8M10 6h4"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
@@ -118,9 +119,8 @@ async function boot() {
   if (native) {
     const info = await native.getLibrary();
     if (info && info.path) {
-      await openLibrary(new NativeDirHandle('', info.name));
-      if (info.fresh) { toast(`הקבצים יישמרו בתיקייה ${info.path}. אפשר להחליף תיקייה בהגדרות.`); printerDialog(); }
-      return;
+      S.internalLib = !!info.internal;
+      return openLibrary(new NativeDirHandle('', info.name));
     }
   }
   const supported = !!native || 'showDirectoryPicker' in window;
@@ -129,9 +129,12 @@ async function boot() {
   <section id="welcome"><div class="welcome-card">
     <div class="logo"><span class="logo-mark">${I.mark}</span>PrintLog</div>
     <h1>כל המודלים שלך, במקום אחד.</h1>
-    <p>בוחרים פעם אחת את תיקיית ה-STL וה-3MF. PrintLog סורק אותה, מציג כל מודל בתלת-ממד, ושומר תגיות, הערות, גרסאות ויומן הדפסות בתוך התיקייה עצמה.</p>
+    <p>${native ? 'כל ההדפסות שלך מ-Bambu, עם תצוגה בתלת-ממד, תגיות והערות. איך להתחיל?' : 'בוחרים פעם אחת את תיקיית ה-STL וה-3MF. PrintLog סורק אותה, מציג כל מודל בתלת-ממד, ושומר תגיות, הערות, גרסאות ויומן הדפסות בתוך התיקייה עצמה.'}</p>
     <div class="welcome-actions">
-      ${supported ? (saved ? `<button class="btn primary" id="resume">${I.folder} המשך עם „${esc(saved.name)}”</button><button class="btn ghost" id="pick">בחר תיקייה אחרת</button>` : `<button class="btn primary" id="pick">${I.folder} בחר תיקיית מודלים</button>`) : ''}
+      ${native ? `<div class="start-choices">
+        <button class="choice" id="cloudonly"><span class="ci">${I.cloud}</span><b>הצג את ההדפסות שלי מ-Bambu</b><span>מתחברים לחשבון Bambu ורואים את כל ההיסטוריה בתלת-ממד. בלי לבחור תיקייה.</span></button>
+        <button class="choice" id="pick"><span class="ci">${I.folder}</span><b>בחר תיקיית מודלים</b><span>יש לך תיקייה עם קבצי STL / 3MF? PrintLog יסרוק אותה ויחבר אליה את ההדפסות.</span></button>
+      </div>` : supported ? (saved ? `<button class="btn primary" id="resume">${I.folder} המשך עם „${esc(saved.name)}”</button><button class="btn ghost" id="pick">בחר תיקייה אחרת</button>` : `<button class="btn primary" id="pick">${I.folder} בחר תיקיית מודלים</button>`) : ''}
     </div>
     ${supported ? '' : `<div class="notice">הדפדפן הזה לא תומך בגישה לתיקיות. פתח את הקובץ ב-<b>Google Chrome</b> או ב-<b>Microsoft Edge</b> (במק או בווינדוס).</div>`}
     <div class="feature-row">
@@ -153,6 +156,12 @@ async function boot() {
     } catch (e) { if (e.name !== 'AbortError') toast('לא ניתן לפתוח את התיקייה: ' + e.message, true); }
   };
   $('#pick') && ($('#pick').onclick = pick);
+  $('#cloudonly') && ($('#cloudonly').onclick = async () => {
+    const info = await native.useCloud();
+    S.internalLib = true;
+    await openLibrary(new NativeDirHandle('', info.name));
+    printerDialog();
+  });
   $('#resume') && ($('#resume').onclick = async () => {
     try {
       const p = await saved.requestPermission({ mode: 'readwrite' });
@@ -478,7 +487,7 @@ async function nativeSettings() {
       : `<div class="acct"><span>לא מחובר</span><button class="btn small primary" data-gdin>התחבר ל-Google Drive</button></div>`}
     <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. בחלון של Google חשוב לסמן את התיבה של Google Drive. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
     ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
-    <div class="acct" style="margin-top:10px"><span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button></div>
+    <div class="acct" style="margin-top:10px">${st.libraryInternal ? `<span>תצוגת ענן בלבד, בלי תיקייה משלך</span><button class="btn small" data-changelib>בחר תיקיית מודלים</button>` : `<span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button>`}</div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
   </div>`;
   };
@@ -750,7 +759,7 @@ function renderShell() {
       <div class="search">${I.search}<input id="q" placeholder="חיפוש לפי שם, תגית, הערה, מעצב…" autocomplete="off"><kbd>/</kbd></div>
       <div class="spacer"></div>
       <button class="btn ghost ppill" id="ppill" title="חיבור למדפסת"></button>
-      <span class="folder-chip" title="${esc(lib.root.name)}">${I.folder}${esc(lib.root.name)}</span>
+      <span class="folder-chip" title="${S.internalLib ? 'תצוגת ענן, בלי תיקייה' : esc(lib.root.name)}">${S.internalLib ? I.cloud + 'ענן' : I.folder + esc(lib.root.name)}</span>
       <button class="btn icon-btn ghost" id="theme" title="מצב תצוגה">${I.theme}</button>
       <button class="btn" id="settings" title="הגדרות">${I.gear}<span>הגדרות</span></button>
       <button class="btn" id="rescan" title="סרוק מחדש">${I.refresh}<span>רענן</span></button>

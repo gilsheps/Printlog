@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('shelfNative', {
     clear: () => ipcRenderer.invoke('archive:clear'),
     move: (rel) => ipcRenderer.invoke('archive:move', rel),
   },
+  useCloud: () => ipcRenderer.invoke('lib:useCloud'),
   getLibrary: () => ipcRenderer.invoke('lib:get'),
   pickFolder: () => ipcRenderer.invoke('lib:pick'),
   sync: {

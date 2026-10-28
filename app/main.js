@@ -109,25 +109,31 @@ ipcMain.handle('fs:remove', async (_e, rel) => {
 });
 
 /* ---------------- library + settings */
-ipcMain.handle('lib:get', () => {
+// "cloud only": no folder of the user's; PrintLog keeps its data (and downloaded models) in its own app folder
+const INTERNAL_LIB = () => path.join(app.getPath('userData'), 'library');
+const libInfo = (c) => (c.libraryInternal ? { path: c.library, name: 'Bambu Cloud', internal: true } : { path: c.library, name: path.basename(c.library) });
+ipcMain.handle('lib:get', () => { const c = cfg(); return c.library && fs.existsSync(c.library) ? libInfo(c) : null; });
+ipcMain.handle('lib:useCloud', () => {
   const c = cfg();
-  if (c.library) return fs.existsSync(c.library) ? { path: c.library, name: path.basename(c.library) } : null;
-  // first run: no need to pick a folder before connecting to Bambu; start with Documents/PrintLog (changeable in settings)
-  try {
-    const dir = path.join(app.getPath('documents'), 'PrintLog');
-    fs.mkdirSync(dir, { recursive: true });
-    c.library = dir;
-    if (c.mode === 'off') c.mode = 'cloud';
-    saveCfg(c);
-    engine.start();
-    return { path: dir, name: path.basename(dir), fresh: true };
-  } catch { return null; }
+  c.library = INTERNAL_LIB();
+  c.libraryInternal = true;
+  fs.mkdirSync(c.library, { recursive: true });
+  if (c.mode === 'off' || !c.mode) c.mode = 'cloud';
+  saveCfg(c);
+  engine.start();
+  return libInfo(c);
 });
 ipcMain.handle('lib:pick', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'בחר את תיקיית המודלים', properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return null;
   const c = cfg();
-  c.library = path.resolve(r.filePaths[0]);
+  const dest = path.resolve(r.filePaths[0]);
+  // moving from "cloud only" to a real folder: bring the notes, tags and downloaded models along
+  if (c.libraryInternal && c.library && fs.existsSync(path.join(c.library, '.shelf')) && !fs.existsSync(path.join(dest, '.shelf'))) {
+    try { fs.cpSync(c.library, dest, { recursive: true, force: false, errorOnExist: false }); } catch (e) { console.warn('copy library', e); }
+  }
+  c.library = dest;
+  c.libraryInternal = false;
   saveCfg(c);
   engine.start();
   return { path: c.library, name: path.basename(c.library) };
@@ -203,7 +209,7 @@ ipcMain.handle('gdrive:restore', async (_e, gpath, destRel) => {
 const publicState = () => {
   const c = cfg();
   return {
-    version: app.getVersion(), platform: process.platform, library: c.library || '', mode: c.mode, archiveDir: c.options.archiveDir || '',
+    version: app.getVersion(), platform: process.platform, library: c.library || '', libraryInternal: !!c.libraryInternal, mode: c.mode, archiveDir: c.options.archiveDir || '',
     cloud: c.cloud ? { email: c.cloud.email, region: c.cloud.region, loggedIn: !!c.cloud.token } : null,
     printers: c.printers.map((p) => ({ serial: p.serial, name: p.name, model: p.model, ip: p.ip || '', access_code: p.access_code || '' })),
     options: { ...c.options, closeToTray: !!c.options.closeToTray },
