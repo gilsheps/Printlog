@@ -64,7 +64,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "shortcutName": "PrintLog"
+      "shortcutName": "PrintLog",
+      "include": "build/installer.nsh",
+      "unicode": true
     },
     "linux": {
       "target": [

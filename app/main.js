@@ -250,6 +250,26 @@ ipcMain.handle('sync:now', async () => {
 /* ---------------- updates: compare with the latest GitHub Release ---------------- */
 const RELEASES = 'https://api.github.com/repos/gilsheps/Printlog/releases/latest'; // public copy of the releases
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+// "delete all PrintLog data": sign out everywhere, remove settings/caches, optionally the .shelf data in the models folder, then quit
+ipcMain.handle('app:wipe', async (_e, { withLibraryData } = {}) => {
+  const c = cfg();
+  try { gdrive.disconnect(); } catch { }
+  try { engine.stop && engine.stop(); } catch { }
+  if (withLibraryData && c.library && !c.libraryInternal) {
+    try { fs.rmSync(path.join(c.library, '.shelf'), { recursive: true, force: true }); } catch { }
+  }
+  try { await require('electron').session.defaultSession.clearStorageData(); } catch { }
+  const ud = app.getPath('userData');
+  // remove what we can now; the rest (files Chromium still holds open) right after the app exits
+  for (const n of ['config.json', 'library', 'gdrive-cache']) { try { fs.rmSync(path.join(ud, n), { recursive: true, force: true }); } catch { } }
+  const { spawn } = require('child_process');
+  if (process.platform === 'win32') spawn('cmd.exe', ['/c', `ping -n 3 127.0.0.1 >nul & rmdir /s /q "${ud}"`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  else spawn('/bin/sh', ['-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.3; done; rm -rf "${ud}"`], { detached: true, stdio: 'ignore' }).unref();
+  CFG = null;
+  quitting = true;
+  setTimeout(() => app.exit(0), 300);
+  return { ok: true };
+});
 ipcMain.handle('app:checkUpdate', async () => {
   try {
     const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'PrintLog' }, signal: AbortSignal.timeout(10000) });

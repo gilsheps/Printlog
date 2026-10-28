@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('shelfNative', {
     syncNow: () => ipcRenderer.invoke('sync:now'),
   },
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
+  wipe: (o) => ipcRenderer.invoke('app:wipe', o),
   installUpdate: (url) => ipcRenderer.invoke('app:installUpdate', url),
   onUpdateProgress: (cb) => ipcRenderer.on('update-progress', (_e, p) => cb(p)),
   openUrl: (url) => ipcRenderer.invoke('app:open', url),

@@ -490,6 +490,7 @@ async function nativeSettings() {
     ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
     <div class="acct" style="margin-top:10px">${st.libraryInternal ? `<span>תצוגת ענן בלבד, בלי תיקייה משלך</span><button class="btn small" data-changelib>בחר תיקיית מודלים</button>` : `<span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button>`}</div>
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
+    ${native.wipe ? `<div class="hint" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">רוצה להסיר את PrintLog לגמרי? <button class="btn small ghost danger" data-wipe>מחק את כל הנתונים של PrintLog</button></div>` : ''}
   </div>`;
   };
   const collect = () => {
@@ -575,6 +576,17 @@ async function nativeSettings() {
       return;
     }
     if (t.closest('[data-checkupd]')) { checkUpdate(true); return; }
+    if (t.closest('[data-wipe]')) {
+      const own = !st.libraryInternal && st.library;
+      let withLib = false;
+      const onChg = (ev) => { if (ev.target && ev.target.id === 'wipelib') withLib = ev.target.checked; };
+      document.addEventListener('change', onChg);
+      const r = await dialog('למחוק את כל הנתונים של PrintLog?', `יימחקו: החיבור ל-Bambu ול-Google Drive, המדפסות, ההעדפות והמטמון${st.libraryInternal ? ', וגם ההערות, התגיות והמודלים שהורדו (במצב תצוגת ענן הם שמורים אצל האפליקציה)' : ''}. האפליקציה תיסגר, ואחר כך אפשר למחוק אותה.<br><br>${own ? `<label class="chk"><input type="checkbox" id="wipelib"> גם למחוק את נתוני PrintLog מתיקיית המודלים (<span class="mono">.shelf</span>: הערות, תגיות, יומן הדפסות ומודלים שהורדו). קבצי ה-STL / 3MF עצמם לא יימחקו.</label><br>` : ''}הקבצים בתיקיית המודלים וב-Google Drive לא נמחקים.`, [{ label: 'מחק הכול', value: 'yes', primary: true }, { label: 'ביטול', value: false }]);
+      document.removeEventListener('change', onChg);
+      if (r !== 'yes') return;
+      await native.wipe({ withLibraryData: withLib });
+      return;
+    }
     if (t.closest('[data-save]')) { await save(); box.remove(); }
   });
   draw();
