@@ -1,0 +1,17 @@
+name: Move release tags
+on:
+  workflow_dispatch:
+    inputs:
+      sha: { description: 'commit to point the tags at', required: true }
+      tags: { description: 'space separated tags', required: true }
+permissions:
+  contents: write
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - run: |
+          git fetch --tags --force
+          for t in ${{ inputs.tags }}; do git tag -f "$t" "${{ inputs.sha }}"; git push -f origin "refs/tags/$t"; done
