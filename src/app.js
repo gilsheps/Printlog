@@ -48,7 +48,7 @@ const fmtBytes = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Ma
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
 const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-const dispPath = (p) => (String(p).startsWith('@models/') ? 'הורד מ-Bambu/' + p.slice(8) : String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
+const dispPath = (p) => (String(p).startsWith('@models/') ? '⬇ Bambu / ' + p.slice(8) : String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
 const isArchived = (p) => /^@(archive|gdrive)\//.test(p);
 const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה', cancel: 'בוטלה' };
 // build plates of the model's current file (each plate = a separate print)
@@ -83,6 +83,28 @@ function dialog(title, text, buttons) {
     });
     document.body.appendChild(d);
   });
+}
+
+/* ================= parsing in the background ================= */
+let workerURL = null;
+const parses = new Set();
+// parse a model in a Web Worker; `tag` lets a closed window cancel its own work
+function parseAsync(name, buf, opts = {}, tag = '') {
+  if (typeof Worker === 'undefined' || typeof __WORKER_SRC__ === 'undefined') return Promise.resolve().then(() => parseModel(name, buf, opts));
+  if (!workerURL) workerURL = URL.createObjectURL(new Blob([__WORKER_SRC__], { type: 'text/javascript' }));
+  return new Promise((resolve, reject) => {
+    let w;
+    try { w = new Worker(workerURL); } catch (e) { resolve(parseModel(name, buf, opts)); return; }
+    const job = { w, tag, reject };
+    parses.add(job);
+    const done = () => { parses.delete(job); w.terminate(); };
+    w.onmessage = (e) => { done(); if (e.data.ok) resolve(e.data.r); else reject(new Error(e.data.error)); };
+    w.onerror = (e) => { done(); reject(new Error(e.message || 'העיבוד נכשל')); };
+    w.postMessage({ name, buf, opts }, [buf]);
+  });
+}
+function cancelParses(tag) {
+  for (const j of [...parses]) if (!tag || j.tag === tag) { parses.delete(j); j.w.terminate(); j.reject(new Error('cancelled')); }
 }
 
 /* ================= state ================= */
@@ -724,8 +746,8 @@ async function makeThumb(path) {
       }
     }
     if (!wrote) {
-      if (file.size > 250e6) throw new Error('קובץ גדול מדי לתמונה ממוזערת');
-      const parsed = parseModel(path, buf);
+      if (file.size > 400e6) throw new Error('קובץ גדול מדי לתמונה ממוזערת');
+      const parsed = await parseAsync(path, buf.slice(0), { budget: 6e5 }, 'thumb');
       const pl = parsed.meta.plates && parsed.meta.plates[0];
       const { blob, dims } = await renderThumbnail(pl ? parsed.parts.filter((p) => p.plate === pl.id) : parsed.parts);
       rec.dims = dims;
@@ -906,7 +928,7 @@ function renderSidebar() {
     ['versions', 'עם כמה גרסאות', I.merge, cnt((m) => m.versions.length > 1)],
   ];
   const nav = ([k, l, ic, c]) => `<button class="nav-item ${S.view === k && !S.tag && S.folder == null ? 'active' : ''}" data-nav="view" data-val="${k}">${ic}<span class="lbl">${l}</span><span class="count">${c}</span></button>`;
-  const folderList = [...folders.entries()].sort((a, b) => a[0].localeCompare(b[0], 'he'));
+  const folderList = [...folders.entries()].filter(([d]) => !d.startsWith("@gdrive")).sort((a, b) => a[0].localeCompare(b[0], 'he'));
   const fname = (d) => (d === '@models' ? 'הורדו מ-Bambu' : d === '@archive' ? '☁ ארכיון' : d.startsWith('@archive/') ? '☁ ' + d.slice(9) : d || 'תיקייה ראשית');
   $('#side').innerHTML = `
     <div class="stats">
@@ -985,6 +1007,28 @@ async function coverURL(file) {
   } catch { coverCache.set(file, null); return null; }
 }
 
+// cloud button on a card: lit = the file is in the cloud, grey = only on this computer (click to upload)
+function cloudBtn(m) {
+  if (!native || !m) return '';
+  const p = M.cur(m).path;
+  if (/^@(gdrive|archive)\//.test(p)) return `<button class="cloudbtn on" data-cloud="${m.id}" title="${p.startsWith('@gdrive/') ? 'בענן (Google Drive). לחיצה: החזר לתיקייה' : 'בארכיון'}">${I.cloud}</button>`;
+  if (p.startsWith('@models/')) return `<span class="cloudbtn on" title="הורד מ-Bambu ונשמר אצלך">${I.cloud}</span>`;
+  if (!hasLocal(m)) return '';
+  return `<button class="cloudbtn" data-cloud="${m.id}" title="רק במחשב. לחיצה: העלה ל-Google Drive">${I.cloud}</button>`;
+}
+async function onCloudBtn(id) {
+  const m = lib.data.models[id];
+  if (!m) return;
+  const p = M.cur(m).path;
+  if (p.startsWith('@gdrive/')) {
+    const ok = await dialog('להחזיר את הקובץ לתיקייה?', `„${esc(m.name)}” יורד מ-Google Drive לתיקיית המודלים וימחק מ-Drive.`, [{ label: 'החזר', value: true, primary: true }, { label: 'ביטול', value: false }]);
+    if (ok) await restoreModel(m);
+    return;
+  }
+  if (p.startsWith('@archive/')) return;
+  if (!archiveOn()) { toast('כדי להעלות לענן, התחבר ל-Google Drive בהגדרות'); printerDialog(); return; }
+  await archiveModels([m]);
+}
 function itemFileBadge(it) {
   if (!it.model) return '<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>';
   const p = M.cur(it.model).path;
@@ -1002,8 +1046,8 @@ function itemCardHTML(it, kind) {
   const when = (t) => { try { return new Date(t).toLocaleDateString('he-IL', { day: 'numeric', month: 'short' }); } catch { return ''; } };
   const sel = it.model && S.selected.has(it.model.id);
   return `<div class="card ${sel ? 'selected' : ''}" data-item="${esc(it.key)}" ${it.model ? `data-id="${it.model.id}"` : ''}>
-    <div class="thumbwrap"><div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
-    <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${itemFileBadge(it)}</div>
+    <div class="thumbwrap">${cloudBtn(it.model)}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
+    <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${it.model ? '' : itemFileBadge(it)}</div>
     ${it.model ? `<div class="check" data-check title="בחר">${I.check}</div>` : ''}
     <div class="body">
       <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
@@ -1173,7 +1217,7 @@ function cardHTML({ m, plate }) {
     : pst && Object.keys(pst).length ? `${okPlates}/${plates.length} פלטות הודפסו · ${fmtDate(M.lastPrint(m))}`
     : `${RESULT[st]} · ${fmtDate(M.lastPrint(m))}${m.prints.length > 1 ? ` · ${m.prints.length} הדפסות` : ''}`;
   return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}">
-    <div class="thumbwrap"><div class="thumb" data-thumb="${esc(v.path)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
+    <div class="thumbwrap">${cloudBtn(m)}<div class="thumb" data-thumb="${esc(v.path)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
     <div class="badges"><span class="badge">${kind === 'stl' ? 'STL' : '3MF'}</span>${kind === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}${m.versions.length > 1 ? `<span class="badge accent">${m.versions.length} גרסאות</span>` : ''}</div>
     <div class="check" data-check>${I.check}</div>
     ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
@@ -1196,7 +1240,7 @@ function plateCardHTML(m, plate) {
   const key = v.path + '#' + plate.id;
   const url = lib.thumbURLs.get(key);
   return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}" data-plate="${plate.id}">
-    <div class="thumbwrap"><div class="thumb" data-pthumb="${esc(key)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
+    <div class="thumbwrap">${cloudBtn(m)}<div class="thumb" data-pthumb="${esc(key)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
     <div class="badges"><span class="badge accent">פלטה ${plate.id}/${plates.length}</span>${fileKind(v.path) === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}</div>
     <div class="check" data-check>${I.check}</div>
     ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
@@ -1299,6 +1343,8 @@ function quickLog(m, result, forPlate) {
 
 function onGridClick(e) {
   if (e.target.closest('.inbox')) { onInboxClick(e); return; }
+  const cb = e.target.closest('[data-cloud]');
+  if (cb) { e.stopPropagation(); onCloudBtn(cb.dataset.cloud); return; }
   const itc = e.target.closest('[data-item]');
   const card = e.target.closest('.card');
   if (!card) return;
@@ -1441,6 +1487,8 @@ function openModal(id) {
   loadView(S.viewPath);
 }
 function closeModal() {
+  loadToken++;
+  cancelParses('view');
   if (viewer) { viewer.destroy(); viewer = null; }
   S.open = null;
   $('#modal').innerHTML = '';
@@ -1468,9 +1516,11 @@ async function loadView(path) {
     const rec = M.rec(path);
     if (rec.missing) throw new Error('הקובץ לא נמצא בתיקייה. אולי נמחק או הוזז מחוץ לתיקייה.');
     const file = await lib.getFile(path);
+    if (file.size > 30e6) ov.innerHTML = `<div class="spin"></div><div class="ov-msg">מעבד מודל גדול (${fmtBytes(file.size)})…</div>`;
     const buf = await file.arrayBuffer();
-    await sleep(10);
-    const parsed = parseModel(path, buf);
+    if (tok !== loadToken || !viewer) return;
+    cancelParses('view');
+    const parsed = await parseAsync(path, buf, { budget: 3e6 }, 'view');
     if (tok !== loadToken || !viewer) return;
     const plates = parsed.meta.plates || [];
     const bed = parsed.meta.bed || { w: 256, d: 256 };
@@ -1481,7 +1531,7 @@ async function loadView(path) {
       const dims = beds ? viewer.showOnBeds(parts, beds) : viewer.show(parts);
       const tri = parts.reduce((a, p) => a + p.positions.length / 9, 0);
       $('#dims').classList.remove('hidden');
-      $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(tri).toLocaleString('he-IL')} משולשים`;
+      $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(parsed.meta.simplified ? (parsed.meta.triangles * tri) / parsed.meta.simplified : tri).toLocaleString('he-IL')} משולשים${parsed.meta.simplified ? ' · מוצג מפושט' : ''}`;
       const pe = $('#plates');
       pe.classList.toggle('hidden', plates.length < 2);
       S.viewPlate = id || null;

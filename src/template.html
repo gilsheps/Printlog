@@ -135,6 +135,13 @@ main{overflow:auto;position:relative}
 .badge{font-size:10.5px;font-weight:600;letter-spacing:.02em;padding:2px 6px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink2)}
 .badge.accent{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
 .item-cover{position:relative}
+.cloudbtn{position:absolute;bottom:8px;inset-inline-start:8px;z-index:2;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;border:1px solid var(--line2);background:color-mix(in srgb,var(--panel) 85%,transparent);color:var(--ink3);cursor:pointer;padding:0;opacity:.75;transition:opacity .12s,color .12s,box-shadow .12s}
+.cloudbtn svg{width:17px;height:17px}
+.card:hover .cloudbtn{opacity:1}
+button.cloudbtn:not(.on):hover{color:var(--ink);border-color:var(--accent)}
+.cloudbtn.on{opacity:1;color:#fff;background:color-mix(in srgb,#5aa9ff 55%,var(--panel));border-color:#7dbaff;box-shadow:0 0 10px rgba(110,180,255,.75)}
+.cloudbtn.on svg{fill:#fff}
+.stage .overlay .ov-msg{margin-top:10px;font-size:13px}
 .item-fetch{position:absolute;inset:auto 8px 8px 8px;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--panel) 88%,transparent);font-size:12.5px;color:var(--ink2)}
 .item-fetch .spin{width:16px;height:16px;flex:none}
 .card .check{position:absolute;z-index:2;top:8px;inset-inline-end:8px;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--line2);background:var(--panel);display:grid;place-items:center;opacity:0;transition:opacity .12s}

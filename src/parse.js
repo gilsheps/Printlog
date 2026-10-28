@@ -20,6 +20,63 @@ export function parseSTL(buffer) {
   return { parts: [{ positions: pos instanceof Float32Array ? pos : new Float32Array(pos), color: DEFAULT_COLOR }], meta: {} };
 }
 
+/* ---------------- big-model helpers ---------------- */
+// growable typed arrays: huge meshes (millions of triangles) never go through plain JS number arrays
+class Grow {
+  constructor(T, n = 4096) { this.T = T; this.a = new T(n); this.n = 0; }
+  need(k) { if (this.n + k > this.a.length) { const b = new this.T(Math.max(this.a.length * 2, this.n + k)); b.set(this.a.subarray(0, this.n)); this.a = b; } }
+  push3(x, y, z) { this.need(3); const a = this.a; a[this.n++] = x; a[this.n++] = y; a[this.n++] = z; }
+  push(x) { this.need(1); this.a[this.n++] = x; }
+  out() { return this.a.slice(0, this.n); }
+}
+
+// vertex-clustering decimation: keeps the shape, drops detail, so very heavy models still open smoothly
+function decimate(mesh, target) {
+  const { verts, tris, paints } = mesh;
+  const nt = tris.length / 3;
+  if (nt <= target || nt < 5000) return mesh;
+  let area = 0, mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (let i = 0; i < verts.length; i += 3) {
+    const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+    if (x < mnx) mnx = x; if (y < mny) mny = y; if (z < mnz) mnz = z; if (x > mxx) mxx = x; if (y > mxy) mxy = y; if (z > mxz) mxz = z;
+  }
+  for (let t = 0; t < tris.length; t += 3) {
+    const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+    const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
+    const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    area += Math.sqrt(cx * cx + cy * cy + cz * cz) / 2;
+  }
+  let cell = Math.sqrt(area / (target / 2)) || 1;
+  const ext = Math.max(mxx - mnx, mxy - mny, mxz - mnz) || 1;
+  cell = Math.max(cell, ext / 100000);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const K = Math.ceil(ext / cell) + 2;
+    const map = new Map();
+    const remap = new Uint32Array(verts.length / 3);
+    const sum = new Grow(Float64Array, 1 << 16), cnt = new Grow(Uint32Array, 1 << 14);
+    for (let i = 0, v = 0; i < verts.length; i += 3, v++) {
+      const key = Math.floor((verts[i] - mnx) / cell) + Math.floor((verts[i + 1] - mny) / cell) * K + Math.floor((verts[i + 2] - mnz) / cell) * K * K;
+      let id = map.get(key);
+      if (id === undefined) { id = cnt.n; map.set(key, id); sum.push3(0, 0, 0); cnt.push(0); }
+      sum.a[id * 3] += verts[i]; sum.a[id * 3 + 1] += verts[i + 1]; sum.a[id * 3 + 2] += verts[i + 2]; cnt.a[id]++;
+      remap[v] = id;
+    }
+    const nt2 = new Grow(Uint32Array, Math.min(tris.length, target * 4)), np = paints ? new Grow(Uint8Array, target * 2) : null;
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = remap[tris[t]], b = remap[tris[t + 1]], c = remap[tris[t + 2]];
+      if (a === b || b === c || a === c) continue;
+      nt2.push3(a, b, c);
+      if (np) np.push(paints[t / 3]);
+    }
+    if (nt2.n / 3 > target * 1.4 && attempt < 3) { cell *= 1.3; continue; }
+    const nv = new Float32Array(cnt.n * 3);
+    for (let i = 0; i < cnt.n; i++) { const k = cnt.a[i]; nv[i * 3] = sum.a[i * 3] / k; nv[i * 3 + 1] = sum.a[i * 3 + 1] / k; nv[i * 3 + 2] = sum.a[i * 3 + 2] / k; }
+    return { verts: nv, tris: nt2.out(), paints: np ? np.out() : null, decimatedFrom: nt };
+  }
+  return mesh;
+}
+
 /* ---------------- 3MF ---------------- */
 function attrs(s) {
   const out = {};
@@ -87,30 +144,44 @@ function parseModelXml(xml) {
     const obj = { id: a.id, type: a.type || 'model', mesh: null, components: [] };
     const meshStart = body.indexOf('<mesh');
     if (meshStart >= 0) {
-      const verts = [];
-      const reV = /<vertex\b([^>]*)\/?>/g;
+      const verts = new Grow(Float32Array, 1 << 15);
+      // fast path for the usual attribute order (x y z / v1 v2 v3), generic fallback otherwise
+      const reVf = /<vertex x="([^"]*)" y="([^"]*)" z="([^"]*)"/g;
       let v;
-      while ((v = reV.exec(body))) {
-        const s = v[1];
-        const x = /\bx="([^"]+)"/.exec(s), y = /\by="([^"]+)"/.exec(s), z = /\bz="([^"]+)"/.exec(s);
-        verts.push(+(x && x[1]) || 0, +(y && y[1]) || 0, +(z && z[1]) || 0);
+      while ((v = reVf.exec(body))) verts.push3(+v[1] || 0, +v[2] || 0, +v[3] || 0);
+      if (!verts.n) {
+        const reV = /<vertex\b([^>]*)\/?>/g;
+        while ((v = reV.exec(body))) {
+          const s = v[1];
+          const x = /\bx="([^"]+)"/.exec(s), y = /\by="([^"]+)"/.exec(s), z = /\bz="([^"]+)"/.exec(s);
+          verts.push3(+(x && x[1]) || 0, +(y && y[1]) || 0, +(z && z[1]) || 0);
+        }
       }
-      const tris = [];
-      const paints = [];
+      const tris = new Grow(Uint32Array, 1 << 15);
+      const paints = new Grow(Uint8Array, 1 << 14);
       let anyPaint = false;
-      const reT = /<triangle\b([^>]*)\/?>/g;
+      const reTf = /<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"([^>]*)>/g;
       let t;
-      while ((t = reT.exec(body))) {
-        const s = t[1];
-        const v1 = /\bv1="(\d+)"/.exec(s), v2 = /\bv2="(\d+)"/.exec(s), v3 = /\bv3="(\d+)"/.exec(s);
-        if (!v1 || !v2 || !v3) continue;
-        tris.push(+v1[1], +v2[1], +v3[1]);
-        const p = /(?:paint_color|mmu_segmentation)="([0-9A-Fa-f]+)"/.exec(s);
-        const st = p ? decodePaint(p[1]) : 0;
+      const paintOf = (s) => { if (!s || s.indexOf('="') < 0) return 0; const p = /(?:paint_color|mmu_segmentation)="([0-9A-Fa-f]+)"/.exec(s); return p ? decodePaint(p[1]) : 0; };
+      while ((t = reTf.exec(body))) {
+        tris.push3(+t[1], +t[2], +t[3]);
+        const st = paintOf(t[4]);
         if (st) anyPaint = true;
         paints.push(st);
       }
-      obj.mesh = { verts: new Float32Array(verts), tris: new Uint32Array(tris), paints: anyPaint ? Uint8Array.from(paints) : null };
+      if (!tris.n) {
+        const reT = /<triangle\b([^>]*)\/?>/g;
+        while ((t = reT.exec(body))) {
+          const s = t[1];
+          const v1 = /\bv1="(\d+)"/.exec(s), v2 = /\bv2="(\d+)"/.exec(s), v3 = /\bv3="(\d+)"/.exec(s);
+          if (!v1 || !v2 || !v3) continue;
+          tris.push3(+v1[1], +v2[1], +v3[1]);
+          const st = paintOf(s);
+          if (st) anyPaint = true;
+          paints.push(st);
+        }
+      }
+      obj.mesh = { verts: verts.out(), tris: tris.out(), paints: anyPaint ? paints.out() : null };
     }
     const reC = /<component\b([^>]*)\/?>/g;
     let c;
@@ -301,19 +372,36 @@ function extractMeta(files) {
   return meta;
 }
 
-export function parse3MF(buffer) {
-  const files = unzipSync(new Uint8Array(buffer));
+export function parse3MF(buffer, opts = {}) {
+  const u8 = new Uint8Array(buffer);
+  // unpack the small files now; the (possibly huge) .model files one at a time, only when needed
+  const sizes = {};
+  const files = unzipSync(u8, { filter: (f) => { sizes[f.name] = f.originalSize; return !/\.model$/i.test(f.name) || (f.name === '3D/3dmodel.model' && f.originalSize < 4e6); } });
+  const names = Object.keys(sizes);
   const meta = extractMeta(files);
+  // ~80 bytes of XML per triangle: estimate the total and thin out meshes beyond the budget
+  const modelBytes = names.filter((n) => /\.model$/i.test(n)).reduce((a, n) => a + sizes[n], 0);
+  const budget = opts.budget || 3e6;
+  const ratio = Math.min(1, budget / Math.max(1, modelBytes / 80));
   const models = new Map();
+  let decimated = 0;
   const getModel = (path) => {
     if (models.has(path)) return models.get(path);
-    const f = files[path];
-    const parsed = f ? parseModelXml(strFromU8(f)) : { objects: new Map(), items: [], metadata: {} };
+    let parsed = { objects: new Map(), items: [], metadata: {} };
+    if (path && names.includes(path)) {
+      const f = files[path] || unzipSync(u8, { filter: (x) => x.name === path })[path];
+      parsed = parseModelXml(strFromU8(f));
+      if (ratio < 1) for (const o of parsed.objects.values()) if (o.mesh && o.mesh.tris.length) {
+        const n0 = o.mesh.tris.length / 3;
+        o.mesh = decimate(o.mesh, Math.max(3000, Math.floor(n0 * ratio)));
+        if (o.mesh.decimatedFrom) decimated += n0 - o.mesh.tris.length / 3;
+      }
+    }
     models.set(path, parsed);
     return parsed;
   };
-  const rootPath = Object.keys(files).find((n) => n.toLowerCase() === '3d/3dmodel.model')
-    || Object.keys(files).find((n) => n.toLowerCase().endsWith('.model'));
+  const rootPath = names.find((n) => n.toLowerCase() === '3d/3dmodel.model')
+    || names.find((n) => n.toLowerCase().endsWith('.model'));
   if (!rootPath) throw new Error('לא נמצא מודל בקובץ ה-3MF');
   const root = getModel(rootPath);
   const settingsXml = files['Metadata/model_settings.config'] ? strFromU8(files['Metadata/model_settings.config']) : null;
@@ -325,12 +413,12 @@ export function parse3MF(buffer) {
   const plateOf = new Map();
   for (const pl of plates) for (const o of pl.objects) plateOf.set(o, pl.id);
   let curPlate = 0;
-  const buckets = new Map(); // plate|color -> number[]
-  const push = (color, arr) => {
+  const buckets = new Map(); // plate|color -> Grow(Float32Array)
+  const bucket = (color) => {
     const k = curPlate + '|' + color;
     let b = buckets.get(k);
-    if (!b) { b = []; buckets.set(k, b); }
-    for (let i = 0; i < arr.length; i++) b.push(arr[i]);
+    if (!b) { b = new Grow(Float32Array, 1 << 15); buckets.set(k, b); }
+    return b;
   };
   const v = new Vector3();
   let triCount = 0;
@@ -338,20 +426,18 @@ export function parse3MF(buffer) {
   const emitMesh = (mesh, matrix, baseExt) => {
     const { verts, tris, paints } = mesh;
     const baseColor = colorFor(baseExt) || (fcolors.length ? fcolors[0] : DEFAULT_COLOR);
-    const groups = new Map();
+    const base = bucket(baseColor);
     for (let t = 0; t < tris.length; t += 3) {
       const st = paints ? paints[t / 3] : 0;
-      const col = st ? colorFor(st) || baseColor : baseColor;
-      let g = groups.get(col);
-      if (!g) { g = []; groups.set(col, g); }
+      const g = st ? bucket(colorFor(st) || baseColor) : base;
+      g.need(9);
       for (let k = 0; k < 3; k++) {
         const i = tris[t + k] * 3;
         v.set(verts[i], verts[i + 1], verts[i + 2]).applyMatrix4(matrix);
-        g.push(v.x, v.y, v.z);
+        g.a[g.n++] = v.x; g.a[g.n++] = v.y; g.a[g.n++] = v.z;
       }
     }
     triCount += tris.length / 3;
-    for (const [col, arr] of groups) push(col, arr);
   };
 
   const visit = (objectid, path, matrix, depth, ext, topSettings) => {
@@ -374,18 +460,19 @@ export function parse3MF(buffer) {
     curPlate = plateOf.get(it.objectid) || 0;
     visit(it.objectid, it.path || rootPath, it.transform.clone(), 0, s ? s.extruder : 0, s);
   }
-  const parts = [...buckets.entries()].map(([k, arr]) => { const i = k.indexOf('|'); return { plate: +k.slice(0, i), color: k.slice(i + 1), positions: new Float32Array(arr) }; });
+  const parts = [...buckets.entries()].filter(([, g]) => g.n).map(([k, g]) => { const i = k.indexOf('|'); return { plate: +k.slice(0, i), color: k.slice(i + 1), positions: g.out() }; });
   const used = [...new Set(parts.map((p) => p.plate))].filter(Boolean).sort((a, b) => a - b);
   meta.plateCount = plates.length;
   meta.plates = used.length > 1 ? used.map((id) => ({ id, name: (plates.find((p) => p.id === id) || {}).name || '' })) : [];
   if (!parts.length) throw new Error('הקובץ לא מכיל גיאומטריה');
   if (!meta.title && root.metadata.Title) meta.title = root.metadata.Title;
-  meta.triangles = triCount;
+  meta.triangles = triCount + decimated;
+  if (decimated) meta.simplified = triCount;
   return { parts, meta };
 }
 
-export function parseModel(name, buffer) {
+export function parseModel(name, buffer, opts) {
   const k = fileKind(name);
   if (k === 'stl') return parseSTL(buffer);
-  return parse3MF(buffer);
+  return parse3MF(buffer, opts);
 }
