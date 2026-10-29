@@ -397,6 +397,13 @@ function notify(e) {
   n.on('click', showWindow);
   n.show();
 }
+// alerts during a print (pause / HMS, first layer, 10 minutes left, AMS)
+function notifyAlert(a) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: a.title, body: `${a.body}${a.printer ? ' · ' + a.printer : ''}`, silent: false });
+  n.on('click', () => { if (a.url && /^https:\/\/e\.bambulab\.com\//.test(a.url)) shell.openExternal(a.url); else showWindow(); });
+  n.show();
+}
 function applyLogin() {
   if (process.platform === 'linux') return;
   app.setLoginItemSettings({ openAtLogin: !!cfg().options.openAtLogin, openAsHidden: true, args: ['--hidden'] });
@@ -423,6 +430,7 @@ app.whenReady().then(() => {
       if (Date.now() - (lastSync || 0) > 500) { lastSync = Date.now(); win && !win.isDestroyed() && win.webContents.send('sync:updated'); }
       updateTray();
     },
+    alert: notifyAlert,
     onModel: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('model-progress', ev); },
     log: (m) => console.log(`[${new Date().toISOString()}] ${m}`),
   });

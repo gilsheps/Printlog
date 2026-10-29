@@ -257,8 +257,70 @@ function mergeDeep(a, b) {
   }
   return b;
 }
+// HMS = Bambu's health-management error codes: attr + code -> "0700_2000_0002_0001"
+function hmsCode(attr, code) {
+  const h = (n) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  const s = h(attr) + h(code);
+  return s.match(/.{4}/g).join('_');
+}
+const HMS_MODULE = { '03': 'תקלה במערכת התנועה', '05': 'תקלה בלוח הראשי', '07': 'תקלה ב-AMS', '08': 'תקלה בראש ההדפסה', '0C': 'תקלה במצלמה או בחיישנים', '12': 'תקלה ב-AMS Lite', '18': 'תקלה ב-AMS HT' };
+const hmsText = (codeStr) => HMS_MODULE[codeStr.slice(0, 2)] || 'תקלה במדפסת';
+const hmsUrl = (codeStr) => `https://e.bambulab.com/index.php?e=${codeStr.replace(/_/g, '')}&s=device_hms&lang=en`;
+function printErrorText(err) {
+  const n = +err || 0;
+  if (!n) return '';
+  if ((n & 0xffff) === 0x8011) return 'הפילמנט נגמר';
+  return 'שגיאה ' + (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
 class LiveWatcher {
   constructor(out, serial, name, source, onPrint) { Object.assign(this, { out, serial, name, source, onPrint }); this.state = {}; this.active = null; this.prev = null; }
+  // notifications during a print: paused / HMS error, first layer done, 10 minutes left, AMS low / humid
+  checkAlerts() {
+    if (!this.onAlert) return;
+    const f = this.full || {};
+    const st = String(f.gcode_state || '').toUpperCase();
+    const job = f.subtask_name || f.gcode_file || 'הדפסה';
+    const first = !this.seeded; // the first report only records what is already true, so starting the app mid-print is quiet
+    this.seeded = true;
+    const jobId = `${f.task_id || f.subtask_id || job}|${f.gcode_start_time || ''}`;
+    if (this.jobId !== jobId) { this.jobId = jobId; this.jobFlags = {}; this.maxRemain = 0; }
+    const J = this.jobFlags;
+    const fire = (kind, title, body, url) => { if (!first) this.onAlert({ kind, title, body, url, printer: this.name }); };
+    const running = st === 'RUNNING';
+    const remain = +f.mc_remaining_time || 0;
+    if (running) this.maxRemain = Math.max(this.maxRemain || 0, remain);
+    // 1. paused, with the reason when the printer gives one
+    const hms = (Array.isArray(f.hms) ? f.hms : []).map((x) => hmsCode(x.attr, x.code));
+    this.hmsSeen = this.hmsSeen || new Set();
+    const fresh = hms.filter((c) => !this.hmsSeen.has(c));
+    if (st === 'PAUSE' && this.lastSt && this.lastSt !== 'PAUSE') {
+      const why = fresh[0] ? `${hmsText(fresh[0])} (קוד ${fresh[0]})` : printErrorText(f.print_error) || 'נעצרה במדפסת';
+      fire('pause', 'ההדפסה הושהתה', `${job} · ${why}`, fresh[0] ? hmsUrl(fresh[0]) : '');
+      fresh.splice(0, 1).forEach((c) => this.hmsSeen.add(c)); // the first code is already in this message
+    }
+    for (const c of fresh) { this.hmsSeen.add(c); fire('pause', hmsText(c), `קוד ${c} · ${job}`, hmsUrl(c)); }
+    if (!hms.length) this.hmsSeen.clear();
+    // 2. first layer done
+    if (running && +f.layer_num >= 2 && !J.firstLayer) { J.firstLayer = 1; fire('firstLayer', 'השכבה הראשונה הסתיימה', `כדאי לבדוק שההדפסה נדבקה · ${job}`); }
+    // 3. ten minutes left (only for prints longer than 20 minutes)
+    if (running && remain > 0 && remain <= 10 && (this.maxRemain || 0) >= 20 && !J.tenMin) { J.tenMin = 1; fire('tenMin', 'נשארו 10 דקות להדפסה', job); }
+    // 4. AMS: a spool about to run out, or humid air
+    this.amsFlags = this.amsFlags || {};
+    const A = this.amsFlags;
+    for (const u of (f.ams && Array.isArray(f.ams.ams) ? f.ams.ams : [])) {
+      for (const t of (Array.isArray(u.tray) ? u.tray : [])) {
+        const k = `low:${u.id}:${t.id}`, r = t.remain == null ? -1 : +t.remain;
+        if (t.tray_type && r >= 0 && r <= 10) { if (!A[k]) { A[k] = 1; this.onAlert({ kind: 'ams', title: 'הפילמנט ב-AMS עומד להיגמר', body: `AMS ${+u.id + 1} · חריץ ${+t.id + 1}: ${t.tray_type}${t.tray_sub_brands ? ' ' + t.tray_sub_brands : ''} · נשארו ${r}%`, printer: this.name }); } }
+        else if (r > 20) delete A[k];
+      }
+      const raw = u.humidity_raw != null ? +u.humidity_raw : null;
+      const hk = `hum:${u.id}`;
+      if (raw != null && raw >= 45) { if (!A[hk]) { A[hk] = 1; this.onAlert({ kind: 'ams', title: 'לחות גבוהה ב-AMS', body: `AMS ${+u.id + 1}: לחות ${raw}% · כדאי לייבש או להחליף חומר סופח`, printer: this.name }); } }
+      else if (raw != null && raw < 38) delete A[hk];
+    }
+    this.lastSt = st;
+  }
   onReport(payload) {
     // everything the printer reports (temperatures, AMS, fans, errors…) for the printer screen
     if (payload && payload.info && Array.isArray(payload.info.module)) this.modules = payload.info.module.map((m) => ({ name: m.name, sw: m.sw_ver || '', hw: m.hw_ver || '', sn: m.sn || '' }));
@@ -266,6 +328,7 @@ class LiveWatcher {
     if (!p || typeof p !== 'object') return;
     this.full = mergeDeep(this.full || {}, p);
     this.fullAt = Date.now();
+    try { this.checkAlerts(); } catch (e) { console.error('alerts', e); }
     for (const [k, v] of Object.entries(p)) if (v === null || typeof v !== 'object') this.state[k] = v;
     const st = String(this.state.gcode_state || '').toUpperCase();
     const job = this.state.subtask_name || this.state.gcode_file || '';
@@ -481,8 +544,8 @@ function discover(ms = 8000, log) {
 
 /* ---------------------------------------------------------------- engine */
 class Engine {
-  constructor({ getConfig, saveConfig, notify, onWrite, onModel, log }) {
-    Object.assign(this, { getConfig, saveConfig, notify, onWrite, onModel: onModel || (() => {}) });
+  constructor({ getConfig, saveConfig, notify, onWrite, onModel, alert, log }) {
+    Object.assign(this, { getConfig, saveConfig, notify, onWrite, onModel: onModel || (() => {}), alert: alert || (() => {}) });
     this.inflight = new Map(); // print key -> download promise
     this.watchers = {}; // serial -> LiveWatcher (for the printer screen)
     this.queue = [];
@@ -540,6 +603,8 @@ class Engine {
       this.refreshDevices().then((n) => { this.fetchingDevices = false; if (n) this.start(); }).catch((e) => { this.fetchingDevices = false; this.log(`devices: ${e.message}`); });
     }
     const onPrint = (e) => { if (cfg.options?.notify !== false) this.notify(e); };
+    const OPT = { pause: 'alertPause', firstLayer: 'alertFirstLayer', tenMin: 'alertTenMin', ams: 'alertAms' };
+    const onAlert = (a) => { const o = this.getConfig().options || {}; if (o[OPT[a.kind]] !== false) { this.log(`alert: ${a.kind} ${a.title} - ${a.body}`); this.alert(a); } };
     // live status: straight from the printer on the LAN when we have its IP + access code,
     // otherwise through Bambu Cloud (like the Home Assistant integration)
     const viaCloud = [];
@@ -548,6 +613,7 @@ class Engine {
       if (lanOk) {
         const w = { [p.serial]: new LiveWatcher(out, p.serial, p.name || p.serial, 'lan', onPrint) };
         this.watchers[p.serial] = w[p.serial];
+        w[p.serial].onAlert = onAlert;
         this.log(`live: ${p.name} via LAN ${p.ip}`);
         this.clients.push(startMqtt({ host: p.ip, user: 'bblp', password: p.access_code, serials: [p.serial], watchers: w, insecure: true, label: `${p.name} (LAN)`, out, log: this.log }));
       } else if (cfg.mode !== 'lan') viaCloud.push(p);
@@ -556,6 +622,7 @@ class Engine {
     if (viaCloud.length && cfg.cloud?.token && cfg.cloud?.user) {
       const ws = Object.fromEntries(viaCloud.map((p) => [p.serial, new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
       Object.assign(this.watchers, ws);
+      Object.values(ws).forEach((x) => { x.onAlert = onAlert; });
       this.log(`live: ${viaCloud.map((p) => p.name).join(', ')} via Bambu Cloud`);
       for (const p of viaCloud) out.setPrinter(p.serial, { name: p.name, conn: 'connecting' }, false);
       this.clients.push(startMqtt({ host: cfg.cloud.region === 'china' ? 'cn.mqtt.bambulab.com' : 'us.mqtt.bambulab.com', user: cfg.cloud.user, password: cfg.cloud.token, serials: Object.keys(ws), watchers: ws, insecure: false, label: 'Bambu Cloud', out, log: this.log }));

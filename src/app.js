@@ -441,9 +441,18 @@ async function installUpdate(r) {
   toast('העדכון האוטומטי נכשל: ' + res.error + '. פותח את דף ההורדה.', true);
   native.openUrl(r.url);
 }
+function markSettingsUpdate() {
+  const b = $('#settings');
+  if (!b) return;
+  b.classList.toggle('has-update', !!S.updateAvail);
+  b.title = S.updateAvail ? `הגדרות · גרסה ${S.updateAvail.latest} זמינה` : 'הגדרות';
+}
 async function checkUpdate(manual) {
   if (!native || !native.checkUpdate) return;
   const r = await native.checkUpdate();
+  // red ring on the settings button while a newer version is waiting
+  S.updateAvail = r.update ? r : null;
+  markSettingsUpdate();
   if (r.update) {
     if (!manual && S.updateShown === r.latest) return;
     S.updateShown = r.latest;
@@ -505,6 +514,12 @@ async function nativeSettings() {
 
     <div class="section-title">כללי</div>
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
+    <div class="alert-opts">
+      <label class="chk"><input type="checkbox" id="oapause" ${st.options.alertPause !== false ? 'checked' : ''}> התראה כשהדפסה נעצרת או יש תקלה (עם קוד התקלה)</label>
+      <label class="chk"><input type="checkbox" id="oafirst" ${st.options.alertFirstLayer !== false ? 'checked' : ''}> התראה כשהשכבה הראשונה מסתיימת</label>
+      <label class="chk"><input type="checkbox" id="oaten" ${st.options.alertTenMin !== false ? 'checked' : ''}> התראה 10 דקות לפני סוף ההדפסה</label>
+      <label class="chk"><input type="checkbox" id="oaams" ${st.options.alertAms !== false ? 'checked' : ''}> התראה כשפילמנט ב-AMS עומד להיגמר או כשהלחות גבוהה</label>
+    </div>
     ${usesCloud ? `<label class="chk"><input type="checkbox" id="oautomodels" ${st.options.autoModels !== false ? 'checked' : ''}> להוריד ברקע מ-Bambu את המודלים של ההדפסות, לתצוגה בתלת-ממד <span class="hint" data-msize style="display:inline"></span></label>` : ''}
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
@@ -515,7 +530,7 @@ async function nativeSettings() {
     <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. בחלון של Google חשוב לסמן את התיבה של Google Drive. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
     ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
     <div class="acct" style="margin-top:10px">${st.libraryInternal ? `<span>תצוגת ענן בלבד, בלי תיקייה משלך</span><button class="btn small" data-changelib>בחר תיקיית מודלים</button>` : `<span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button>`}</div>
-    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
+    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span>${S.updateAvail ? `<button class="btn small upd-btn" data-doupd>עדכן לגרסה ${esc(S.updateAvail.latest)}</button>` : `<button class="btn small ghost" data-checkupd>בדוק עדכונים</button>`}</div>
     ${native.wipe ? `<div class="hint" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">רוצה להסיר את PrintLog לגמרי? <button class="btn small ghost danger" data-wipe>מחק את כל הנתונים של PrintLog</button></div>` : ''}
   </div>`;
     if (native.sync.modelsSize) native.sync.modelsSize().then((b) => { const e = $('[data-msize]', box); if (e && b) e.textContent = `(${fmtBytes(b)} שמורים)`; }).catch(() => {});
@@ -525,7 +540,7 @@ async function nativeSettings() {
   };
   const save = async (quiet) => {
     collect();
-    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}) } });
+    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, alertPause: $('#oapause', box).checked, alertFirstLayer: $('#oafirst', box).checked, alertTenMin: $('#oaten', box).checked, alertAms: $('#oaams', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}) } });
     if ($('#oautomodels', box)) { S.autoModels = $('#oautomodels', box).checked; schedulePrefetch(); }
     printers = (st.printers || []).map((p) => ({ ...p }));
     if (!quiet) toast('ההגדרות נשמרו');
@@ -603,7 +618,8 @@ async function nativeSettings() {
       if (info) location.reload();
       return;
     }
-    if (t.closest('[data-checkupd]')) { checkUpdate(true); return; }
+    if (t.closest('[data-checkupd]')) { await checkUpdate(true); draw(); return; }
+    if (t.closest('[data-doupd]')) { const u = S.updateAvail; box.remove(); if (u.canInstall) installUpdate(u); else native.openUrl(u.url); return; }
     if (t.closest('[data-wipe]')) {
       const own = !st.libraryInternal && st.library;
       let withLib = false;
@@ -840,6 +856,7 @@ function renderShell() {
 
   $('#ppill').onclick = () => printerDialog();
   $('#settings').onclick = () => printerDialog();
+  markSettingsUpdate();
   if (native && native.onOpenSettings) native.onOpenSettings(() => printerDialog());
   if (!document.__settingsKey) { document.__settingsKey = 1; document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === ',' && !(native && navigator.platform.startsWith('Mac'))) { e.preventDefault(); printerDialog(); } }); }
   $('#side').addEventListener('click', (e) => {

@@ -71,6 +71,11 @@ button{cursor:pointer}
 .welcome-card h1{font-size:34px;line-height:1.15;margin:26px 0 12px;letter-spacing:-.02em}
 .welcome-card p{color:var(--ink2);font-size:16px;margin:0 0 26px}
 .welcome-actions{display:flex;flex-direction:column;gap:10px;align-items:center}
+#settings{position:relative}
+.alert-opts{margin-inline-start:24px;display:flex;flex-direction:column;gap:2px}
+#settings.has-update{border-color:var(--fail,#e5484d);box-shadow:0 0 0 2px color-mix(in srgb,var(--fail,#e5484d) 35%,transparent)}
+#settings.has-update::after{content:"";position:absolute;top:-4px;inset-inline-end:-4px;width:11px;height:11px;border-radius:50%;background:var(--fail,#e5484d);border:2px solid var(--bg,#fff)}
+.upd-btn{border-color:var(--fail,#e5484d);color:var(--fail,#e5484d)}
 .welcome-actions .btn{font-size:15px;padding:11px 20px}
 .start-choices{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:620px}
 .choice{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:start;padding:18px;border-radius:14px;border:1.5px solid var(--line2);background:var(--panel);color:var(--ink);cursor:pointer;font:inherit;transition:border-color .12s,transform .12s}
