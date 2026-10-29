@@ -240,11 +240,32 @@ class Output {
 
 /* ---------------------------------------------------------------- live */
 const RUNNING = ['PREPARE', 'RUNNING', 'PAUSE', 'SLICING'];
+// Bambu sends partial updates: merge objects, and lists of {id} items by id (AMS units, trays)
+function mergeDeep(a, b) {
+  if (Array.isArray(b)) {
+    if (Array.isArray(a) && b.every((x) => x && typeof x === 'object' && 'id' in x)) {
+      const out = a.map((x) => ({ ...x }));
+      for (const x of b) { const i = out.findIndex((y) => y && String(y.id) === String(x.id)); if (i >= 0) out[i] = mergeDeep(out[i], x); else out.push(x); }
+      return out;
+    }
+    return b;
+  }
+  if (b && typeof b === 'object') {
+    const out = a && typeof a === 'object' && !Array.isArray(a) ? { ...a } : {};
+    for (const [k, v] of Object.entries(b)) out[k] = mergeDeep(out[k], v);
+    return out;
+  }
+  return b;
+}
 class LiveWatcher {
   constructor(out, serial, name, source, onPrint) { Object.assign(this, { out, serial, name, source, onPrint }); this.state = {}; this.active = null; this.prev = null; }
   onReport(payload) {
+    // everything the printer reports (temperatures, AMS, fans, errors…) for the printer screen
+    if (payload && payload.info && Array.isArray(payload.info.module)) this.modules = payload.info.module.map((m) => ({ name: m.name, sw: m.sw_ver || '', hw: m.hw_ver || '', sn: m.sn || '' }));
     const p = payload && payload.print;
     if (!p || typeof p !== 'object') return;
+    this.full = mergeDeep(this.full || {}, p);
+    this.fullAt = Date.now();
     for (const [k, v] of Object.entries(p)) if (v === null || typeof v !== 'object') this.state[k] = v;
     const st = String(this.state.gcode_state || '').toUpperCase();
     const job = this.state.subtask_name || this.state.gcode_file || '';
@@ -344,6 +365,7 @@ function startMqtt({ host, port = 8883, user, password, serials, watchers, insec
         serials.forEach((s, i) => {
           c.subscribe(`device/${s}/report`, i + 1);
           c.publish(`device/${s}/request`, JSON.stringify({ pushing: { sequence_id: '0', command: 'pushall', version: 1, push_target: 1 } }));
+          c.publish(`device/${s}/request`, JSON.stringify({ info: { sequence_id: '1', command: 'get_version' } }));
         });
       } else {
         const reason = { 4: 'Access Code / חיבור שגוי', 5: 'אין הרשאה' }[rc] || `קוד ${rc}`;
@@ -462,6 +484,7 @@ class Engine {
   constructor({ getConfig, saveConfig, notify, onWrite, onModel, log }) {
     Object.assign(this, { getConfig, saveConfig, notify, onWrite, onModel: onModel || (() => {}) });
     this.inflight = new Map(); // print key -> download promise
+    this.watchers = {}; // serial -> LiveWatcher (for the printer screen)
     this.queue = [];
     this.queueBusy = false;
     const base = log || console.log;
@@ -481,6 +504,7 @@ class Engine {
   stop() {
     this.clients.forEach((c) => c.stop());
     this.clients = [];
+    this.watchers = {};
     clearTimeout(this.timer);
     clearInterval(this.flushT);
     if (this.out) this.out.setHelper({ stopped: nowIso() });
@@ -523,6 +547,7 @@ class Engine {
       const lanOk = (cfg.mode === 'lan' || cfg.mode === 'both') && p.ip && p.access_code;
       if (lanOk) {
         const w = { [p.serial]: new LiveWatcher(out, p.serial, p.name || p.serial, 'lan', onPrint) };
+        this.watchers[p.serial] = w[p.serial];
         this.log(`live: ${p.name} via LAN ${p.ip}`);
         this.clients.push(startMqtt({ host: p.ip, user: 'bblp', password: p.access_code, serials: [p.serial], watchers: w, insecure: true, label: `${p.name} (LAN)`, out, log: this.log }));
       } else if (cfg.mode !== 'lan') viaCloud.push(p);
@@ -530,6 +555,7 @@ class Engine {
     }
     if (viaCloud.length && cfg.cloud?.token && cfg.cloud?.user) {
       const ws = Object.fromEntries(viaCloud.map((p) => [p.serial, new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
+      Object.assign(this.watchers, ws);
       this.log(`live: ${viaCloud.map((p) => p.name).join(', ')} via Bambu Cloud`);
       for (const p of viaCloud) out.setPrinter(p.serial, { name: p.name, conn: 'connecting' }, false);
       this.clients.push(startMqtt({ host: cfg.cloud.region === 'china' ? 'cn.mqtt.bambulab.com' : 'us.mqtt.bambulab.com', user: cfg.cloud.user, password: cfg.cloud.token, serials: Object.keys(ws), watchers: ws, insecure: false, label: 'Bambu Cloud', out, log: this.log }));
@@ -605,6 +631,13 @@ class Engine {
   }
 
   // download the 3MF of a print into "<library>/Bambu Cloud/" so it can be shown in 3D
+  printerDetail(serial) {
+    const cfg = this.getConfig();
+    const p = (cfg.printers || []).find((x) => x.serial === serial) || {};
+    const w = this.watchers[serial];
+    const st = this.out && this.out.data.printers[serial];
+    return { serial, name: p.name || serial, model: p.model || '', ip: p.ip || '', conn: w ? w.source : '', status: st || null, report: w ? w.full || null : null, reportAt: w ? w.fullAt || 0 : 0, modules: w ? w.modules || [] : [] };
+  }
   // the same design printed many times is downloaded once
   static modelGroup(e) {
     if (e.instanceId && e.instanceId !== '0') return 'i' + e.instanceId;

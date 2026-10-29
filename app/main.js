@@ -236,6 +236,7 @@ ipcMain.handle('sync:login', (_e, a) => engine.login(a));
 ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
 ipcMain.handle('sync:discover', () => discover(8000, (m) => engine && engine.log(m)));
+ipcMain.handle('sync:printer', (_e, serial) => { try { return engine.printerDetail(serial); } catch { return null; } });
 ipcMain.handle('sync:prefetch', (_e, keys) => { try { if (!engine.out) engine.start(); return engine.prefetch(Array.isArray(keys) ? keys.slice(0, 5000) : []); } catch { return 0; } });
 ipcMain.handle('sync:modelsSize', () => {
   try { const d = path.join(cfg().library, '.shelf', 'models'); return fs.readdirSync(d).reduce((a, n) => a + (n.startsWith('.') ? 0 : fs.statSync(path.join(d, n)).size), 0); } catch { return 0; }

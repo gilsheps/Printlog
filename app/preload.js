@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('shelfNative', {
     login: (a) => ipcRenderer.invoke('sync:login', a),
     fetchModel: (key) => ipcRenderer.invoke('sync:fetchModel', key),
     prefetch: (keys) => ipcRenderer.invoke('sync:prefetch', keys),
+    printer: (serial) => ipcRenderer.invoke('sync:printer', serial),
     modelsSize: () => ipcRenderer.invoke('sync:modelsSize'),
     onModel: (cb) => ipcRenderer.on('model-progress', (_e, ev) => cb(ev)),
     verify: (a) => ipcRenderer.invoke('sync:verify', a),
