@@ -236,6 +236,10 @@ ipcMain.handle('sync:login', (_e, a) => engine.login(a));
 ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
 ipcMain.handle('sync:discover', () => discover(8000, (m) => engine && engine.log(m)));
+ipcMain.handle('sync:prefetch', (_e, keys) => { try { if (!engine.out) engine.start(); return engine.prefetch(Array.isArray(keys) ? keys.slice(0, 5000) : []); } catch { return 0; } });
+ipcMain.handle('sync:modelsSize', () => {
+  try { const d = path.join(cfg().library, '.shelf', 'models'); return fs.readdirSync(d).reduce((a, n) => a + (n.startsWith('.') ? 0 : fs.statSync(path.join(d, n)).size), 0); } catch { return 0; }
+});
 ipcMain.handle('sync:fetchModel', async (_e, key) => {
   try { if (!engine.out) engine.start(); return { ok: true, ...(await engine.fetchModel(key)) }; }
   catch (e) { return { ok: false, error: e.message }; }
@@ -418,6 +422,7 @@ app.whenReady().then(() => {
       if (Date.now() - (lastSync || 0) > 500) { lastSync = Date.now(); win && !win.isDestroyed() && win.webContents.send('sync:updated'); }
       updateTray();
     },
+    onModel: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('model-progress', ev); },
     log: (m) => console.log(`[${new Date().toISOString()}] ${m}`),
   });
   const hidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAsHidden;

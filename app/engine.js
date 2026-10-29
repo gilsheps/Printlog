@@ -459,8 +459,11 @@ function discover(ms = 8000, log) {
 
 /* ---------------------------------------------------------------- engine */
 class Engine {
-  constructor({ getConfig, saveConfig, notify, onWrite, log }) {
-    Object.assign(this, { getConfig, saveConfig, notify, onWrite });
+  constructor({ getConfig, saveConfig, notify, onWrite, onModel, log }) {
+    Object.assign(this, { getConfig, saveConfig, notify, onWrite, onModel: onModel || (() => {}) });
+    this.inflight = new Map(); // print key -> download promise
+    this.queue = [];
+    this.queueBusy = false;
     const base = log || console.log;
     // also keep a small log next to the library data, to make problems easy to diagnose
     this.log = (m) => {
@@ -602,29 +605,96 @@ class Engine {
   }
 
   // download the 3MF of a print into "<library>/Bambu Cloud/" so it can be shown in 3D
-  async fetchModel(key) {
+  // the same design printed many times is downloaded once
+  static modelGroup(e) {
+    if (e.instanceId && e.instanceId !== '0') return 'i' + e.instanceId;
+    if (e.profileId && e.profileId !== '0' && e.designId) return 'i' + e.profileId;
+    if (e.modelId) return 'm' + e.modelId;
+    return '';
+  }
+  existingModel(e) {
+    const cfg = this.getConfig();
+    const ok = (p) => p.modelFile && fs.existsSync(path.join(cfg.library, '.shelf', 'models', p.modelFile.replace(/^@models\//, '')));
+    if (ok(e)) return e.modelFile;
+    const g = Engine.modelGroup(e);
+    const twin = g && this.out.data.prints.find((p) => p !== e && Engine.modelGroup(p) === g && ok(p));
+    return twin ? twin.modelFile : '';
+  }
+  fetchModel(key, onProgress) {
+    if (this.inflight.has(key)) return this.inflight.get(key);
+    const pr = this.doFetchModel(key, onProgress).finally(() => this.inflight.delete(key));
+    this.inflight.set(key, pr);
+    return pr;
+  }
+  async doFetchModel(key, onProgress = () => {}) {
     const cfg = this.getConfig();
     if (!cfg.cloud || !cfg.cloud.token) throw new CloudError('צריך להתחבר ל-Bambu בהגדרות');
     if (!this.out) throw new CloudError('הסנכרון לא פועל');
     const e = this.out.data.prints.find((p) => p.key === key || (p.aliasKeys || []).includes(key));
     if (!e) throw new CloudError('ההדפסה לא נמצאה');
+    const have = this.existingModel(e);
+    if (have) { e.modelFile = have; return { path: have, reused: true }; }
     const cloud = new BambuCloud(cfg.cloud.region, cfg.cloud.token);
     const { url, name } = await cloud.modelUrl(e, (m) => this.log(m));
-    const r = await fetch(url, { signal: AbortSignal.timeout(10 * 60 * 1000) });
-    if (!r.ok) throw new CloudError(`ההורדה נכשלה (HTTP ${r.status})`);
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.length < 100 || buf[0] !== 0x50 || buf[1] !== 0x4b) throw new CloudError('הקובץ שהתקבל הוא לא 3MF');
+    const r = await fetch(url, { signal: AbortSignal.timeout(20 * 60 * 1000) });
+    if (!r.ok || !r.body) throw new CloudError(`ההורדה נכשלה (HTTP ${r.status})`);
+    const total = +r.headers.get('content-length') || 0;
     const ext = /\.gcode\.3mf(\?|$)/i.test(url) ? '.gcode.3mf' : '.3mf';
     const base = String(name || e.design || e.title || `print-${e.key}`).replace(/\.(gcode\.)?3mf$/i, '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim().slice(0, 100) || 'model';
     const dir = path.join(cfg.library, '.shelf', 'models'); // hidden: downloaded once, reused every time
     fs.mkdirSync(dir, { recursive: true });
+    // stream to disk (models can be hundreds of MB) and report progress
+    const part = path.join(dir, `.${crypto.randomBytes(4).toString('hex')}.part`);
+    const out = fs.createWriteStream(part);
+    let got = 0, last = 0, head = null;
+    try {
+      for await (const chunk of r.body) {
+        if (!head) head = Buffer.from(chunk.slice(0, 2));
+        got += chunk.length;
+        if (!out.write(chunk)) await new Promise((res) => out.once('drain', res));
+        if (Date.now() - last > 200) { last = Date.now(); onProgress(got, total); }
+      }
+      await new Promise((res, rej) => out.end((err) => (err ? rej(err) : res())));
+    } catch (err) { out.destroy(); try { fs.unlinkSync(part); } catch { } throw err; }
+    if (got < 100 || !head || head[0] !== 0x50 || head[1] !== 0x4b) { try { fs.unlinkSync(part); } catch { } throw new CloudError('הקובץ שהתקבל הוא לא 3MF'); }
     let file = path.join(dir, base + ext);
-    for (let i = 2; fs.existsSync(file) && fs.statSync(file).size !== buf.length; i++) file = path.join(dir, `${base} (${i})${ext}`);
-    if (!fs.existsSync(file)) fs.writeFileSync(file, buf);
+    for (let i = 2; fs.existsSync(file) && fs.statSync(file).size !== got; i++) file = path.join(dir, `${base} (${i})${ext}`);
+    if (fs.existsSync(file)) fs.unlinkSync(part); else fs.renameSync(part, file);
     e.modelFile = '@models/' + path.basename(file);
     this.out.write();
-    this.log(`model: saved ${e.modelFile} (${buf.length} bytes)`);
-    return { path: e.modelFile, size: buf.length };
+    this.log(`model: saved ${e.modelFile} (${got} bytes)`);
+    return { path: e.modelFile, size: got };
+  }
+  // background queue: one model at a time, outside the window, with progress events for the cards
+  prefetch(keys) {
+    const cfg = this.getConfig();
+    if (!cfg.cloud || !cfg.cloud.token || !this.out || cfg.options?.autoModels === false) return 0;
+    for (const k of keys) if (!this.queue.includes(k)) this.queue.push(k);
+    this.runQueue();
+    return this.queue.length;
+  }
+  async runQueue() {
+    if (this.queueBusy) return;
+    this.queueBusy = true;
+    try {
+      while (this.queue.length) {
+        const key = this.queue.shift();
+        const e = this.out && this.out.data.prints.find((p) => p.key === key);
+        if (!e || (e.modelTries || 0) >= 2) { this.onModel({ key, state: 'error', error: e ? e.modelError : '' }); continue; }
+        this.onModel({ key, state: 'dl', p: 0 });
+        try {
+          const r = await this.fetchModel(key, (got, total) => this.onModel({ key, state: 'dl', p: total ? got / total : null, got, total }));
+          this.onModel({ key, state: 'done', path: r.path });
+          if (!r.reused) await new Promise((res) => setTimeout(res, 1200)); // be gentle with Bambu's servers
+        } catch (err) {
+          e.modelTries = (e.modelTries || 0) + 1; e.modelError = err.message;
+          this.out.write(true);
+          this.log(`model: ${key} failed (${err.message})`);
+          this.onModel({ key, state: 'error', error: err.message });
+        }
+        if (this.getConfig().options?.autoModels === false) this.queue.length = 0;
+      }
+    } finally { this.queueBusy = false; }
   }
 
   async refreshDevices() {

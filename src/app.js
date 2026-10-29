@@ -211,6 +211,8 @@ async function openLibrary(dir) {
   setInterval(() => { if (!document.hidden) syncPrints(false); }, 20000);
   if (native) {
     native.onSync(() => syncPrints(false));
+    if (native.sync.onModel) native.sync.onModel(onModelEvent);
+    try { S.autoModels = (await native.sync.getState()).options.autoModels !== false; } catch { }
     setTimeout(() => checkUpdate(false), 8000);
     setInterval(() => checkUpdate(false), 12 * 3600 * 1000);
   }
@@ -255,6 +257,7 @@ async function syncPrints(force) {
     }
   }
   renderPrinterPill();
+  schedulePrefetch();
 }
 
 const PSTATE = { running: 'מדפיס', prepare: 'מתכונן', pause: 'מושהה', finish: 'סיים', failed: 'נכשל', idle: 'פנוי', slicing: 'פורס', offline: 'לא מחובר', error: 'שגיאת חיבור', unknown: 'לא ידוע', connecting: 'מתחבר…', silent: 'לא מגיבה (כבויה?)' };
@@ -502,6 +505,7 @@ async function nativeSettings() {
 
     <div class="section-title">כללי</div>
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
+    ${usesCloud ? `<label class="chk"><input type="checkbox" id="oautomodels" ${st.options.autoModels !== false ? 'checked' : ''}> להוריד ברקע מ-Bambu את המודלים של ההדפסות, לתצוגה בתלת-ממד <span class="hint" data-msize style="display:inline"></span></label>` : ''}
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
     <div class="section-title">ארכיון ב-Google Drive</div>
@@ -514,13 +518,15 @@ async function nativeSettings() {
     <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span><button class="btn small ghost" data-checkupd>בדוק עדכונים</button></div>
     ${native.wipe ? `<div class="hint" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">רוצה להסיר את PrintLog לגמרי? <button class="btn small ghost danger" data-wipe>מחק את כל הנתונים של PrintLog</button></div>` : ''}
   </div>`;
+    if (native.sync.modelsSize) native.sync.modelsSize().then((b) => { const e = $('[data-msize]', box); if (e && b) e.textContent = `(${fmtBytes(b)} שמורים)`; }).catch(() => {});
   };
   const collect = () => {
     for (const inp of $$('[data-pf]', box)) printers[+inp.dataset.i][inp.dataset.pf] = inp.value.trim();
   };
   const save = async (quiet) => {
     collect();
-    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked } });
+    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}) } });
+    if ($('#oautomodels', box)) { S.autoModels = $('#oautomodels', box).checked; schedulePrefetch(); }
     printers = (st.printers || []).map((p) => ({ ...p }));
     if (!quiet) toast('ההגדרות נשמרו');
   };
@@ -1029,6 +1035,77 @@ async function onCloudBtn(id) {
   if (!archiveOn()) { toast('כדי להעלות לענן, התחבר ל-Google Drive בהגדרות'); printerDialog(); return; }
   await archiveModels([m]);
 }
+/* ---------- background model downloads (run in the app's main process, not in the window) ---------- */
+S.dl = new Map(); // print key -> { state: queued | dl | done | error, p }
+S.dlDone = new Set();
+function dlKey(it) {
+  if (!native || !native.sync.prefetch) return '';
+  const e = it.runs.map((r) => r.entry).find((x) => x && /^cloud-/.test(x.key || ''));
+  return e ? e.key : '';
+}
+function dlState(it, k) {
+  const s = S.dl.get(k);
+  if (s) return s;
+  const e = it.runs.map((r) => r.entry).find((x) => x && x.key === k);
+  if (e && e.modelTries >= 2) return { state: 'error', error: e.modelError };
+  return { state: S.autoModels === false ? 'off' : 'queued' };
+}
+const dlClass = (s) => ({ queued: 'pending', off: 'pending', dl: 'dl', error: 'nofile', done: 'dl' }[s.state] || '');
+const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? `מוריד ${Math.round((s.p || 0) * 100)}%` : 'מוריד…') : s.state === 'error' ? 'אין קובץ ב-Bambu' : s.state === 'off' ? 'לחץ להורדה' : 'ממתין להורדה');
+function applyDl(el, s) {
+  el.classList.remove('pending', 'dl', 'nofile');
+  const c = dlClass(s); if (c) el.classList.add(c);
+  el.style.setProperty('--p', s.p == null ? 0 : s.p);
+  el.classList.toggle('indet', s.state === 'dl' && s.p == null);
+  const m = el.querySelector('.dlmsg'); if (m) m.textContent = dlLabel(s);
+}
+let prefetchTimer = null;
+function schedulePrefetch() { clearTimeout(prefetchTimer); prefetchTimer = setTimeout(prefetchModels, 1500); }
+async function prefetchModels() {
+  if (!native || !native.sync.prefetch || !S.sync || S.autoModels === false) return;
+  // newest prints first: the cards at the top fill in first
+  const list = printItems().filter((it) => !it.model).sort((a, b) => (b.last.t || 0) - (a.last.t || 0));
+  const keys = [];
+  for (const it of list) {
+    const k = dlKey(it);
+    if (!k) continue;
+    const s = dlState(it, k);
+    if (s.state === 'error' || s.state === 'done') continue;
+    keys.push(k);
+  }
+  if (keys.length) await native.sync.prefetch(keys);
+}
+function onModelEvent(ev) {
+  const prev = S.dl.get(ev.key);
+  S.dl.set(ev.key, { ...(prev || {}), ...ev });
+  for (const el of document.querySelectorAll(`.card[data-dlkey="${CSS.escape(ev.key)}"]`)) applyDl(el, S.dl.get(ev.key));
+  if (ev.state === 'done') { S.dlDone.add(ev.key); clearTimeout(S.dlT); S.dlT = setTimeout(attachDownloads, 1500); }
+}
+// a finished download becomes a normal model: scan it in and attach its prints
+async function attachDownloads() {
+  if (S.scanning) { S.dlT = setTimeout(attachDownloads, 2000); return; }
+  const keys = new Set(S.dlDone); S.dlDone.clear();
+  await rescan(false);
+  lib.data.imported = lib.data.imported || {};
+  let n = 0;
+  for (const it of printItems()) {
+    if (it.model) continue;
+    const k = dlKey(it);
+    if (!keys.has(k)) continue;
+    const p = (S.dl.get(k) || {}).path;
+    const m = p && M.list().find((x) => x.versions.some((v) => v.path === p));
+    if (!m) continue;
+    for (const run of it.runs) if (run.entry && !lib.data.imported[run.entry.key]) attach(lib, m, run.entry);
+    n++;
+  }
+  if (!n) return;
+  const r = importPrints(lib, S.sync);
+  S.unmatched = r.unmatched;
+  lib.save();
+  renderSidebar(); renderToolbar();
+  if (!S.open) renderGrid(); else renderInfo();
+}
+
 function itemFileBadge(it) {
   if (!it.model) return '<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>';
   const p = M.cur(it.model).path;
@@ -1045,9 +1122,12 @@ function itemCardHTML(it, kind) {
   const url = cached || local;
   const when = (t) => { try { return new Date(t).toLocaleDateString('he-IL', { day: 'numeric', month: 'short' }); } catch { return ''; } };
   const sel = it.model && S.selected.has(it.model.id);
-  return `<div class="card ${sel ? 'selected' : ''}" data-item="${esc(it.key)}" ${it.model ? `data-id="${it.model.id}"` : ''}>
-    <div class="thumbwrap">${cloudBtn(it.model)}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
-    <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${it.model ? '' : itemFileBadge(it)}</div>
+  // no file yet: the card stays grey until its model has been downloaded from Bambu in the background
+  const dk = !it.model ? dlKey(it) : '';
+  const ds = dk ? dlState(it, dk) : null;
+  return `<div class="card ${sel ? 'selected' : ''} ${ds ? dlClass(ds) : ''}" data-item="${esc(it.key)}" ${it.model ? `data-id="${it.model.id}"` : ''} ${dk ? `data-dlkey="${esc(dk)}" style="--p:${ds.p || 0}"` : ''}>
+    <div class="thumbwrap">${cloudBtn(it.model)}${dk ? `<div class="dlbar"><i></i></div><span class="dlmsg">${dlLabel(ds)}</span>` : ''}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
+    <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${it.model || dk ? '' : itemFileBadge(it)}</div>
     ${it.model ? `<div class="check" data-check title="בחר">${I.check}</div>` : ''}
     <div class="body">
       <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
