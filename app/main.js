@@ -334,7 +334,7 @@ open "$1"
     return { ok: true };
   } catch (e) { return { ok: false, error: e.code === 'EACCES' ? 'אין הרשאה להחליף את האפליקציה בתיקייה הזו' : e.message }; }
 });
-ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
+ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/(github\.com|e\.bambulab\.com)\//.test(url)) shell.openExternal(url); });
 
 /* ---------------- window, tray, notifications */
 function iconPath(name) { return path.join(__dirname, 'assets', name); }

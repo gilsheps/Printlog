@@ -1,5 +1,6 @@
 import { Library, kvGet, kvSet, uid, baseName, dirName, stripExt, prettyName } from './store.js';
 import { parseModel, read3MFMeta, fileKind } from './parse.js';
+import { printerScreenHTML } from './printer.js';
 import { renderThumbnail, Viewer, bedLayout } from './render.js';
 import { readSyncFile, importPrints, attach, norm, isGeneric, entryResult } from './sync.js';
 import helperSrc from '../helper/shelf_sync.py';
@@ -301,6 +302,43 @@ function fmtAgo(iso) {
   if (m < 60) return `לפני ${m} דק׳`;
   if (m < 60 * 24) return `לפני ${Math.round(m / 60)} שע׳`;
   return fmtDate(iso);
+}
+
+/* ---------- printer screen (click the printer name in the header) ---------- */
+async function printerScreen(serial) {
+  const list = Object.entries((S.sync && S.sync.printers) || {}).map(([s, p]) => ({ serial: s, name: p.name || s }));
+  if (!list.length) return printerDialog();
+  let cur = serial || (list.find((p) => ['running', 'pause', 'prepare'].includes((S.sync.printers[p.serial] || {}).state)) || list[0]).serial;
+  const d = document.createElement('div');
+  d.className = 'dialog';
+  d.innerHTML = `<div class="box printer-screen"><div class="pr-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-body"><div class="spin"></div></div></div>`;
+  document.body.appendChild(d);
+  let timer = null;
+  const close = () => { clearInterval(timer); d.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  const draw = async () => {
+    const info = await native.sync.printer(cur).catch(() => null);
+    if (!d.isConnected) return;
+    if (!info) { $('.pr-body', d).innerHTML = '<div class="hint">אין נתונים מהמדפסת.</div>'; return; }
+    $('[data-pname]', d).textContent = info.name;
+    $('.pr-tabs', d).innerHTML = list.length > 1 ? list.map((p) => `<button class="btn small ${p.serial === cur ? 'on' : 'ghost'}" data-ptab="${esc(p.serial)}">${esc(p.name)}</button>`).join('') : '';
+    const body = $('.pr-body', d);
+    const top = body.scrollTop;
+    body.innerHTML = printerScreenHTML(info, { esc, fmtDur, I, prints: (S.sync && S.sync.prints) || [] });
+    body.scrollTop = top;
+  };
+  d.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t === d || t.closest('[data-close]')) { close(); return; }
+    if (t.closest('[data-psettings]')) { close(); printerDialog(); return; }
+    const tab = t.closest('[data-ptab]');
+    if (tab) { cur = tab.dataset.ptab; draw(); return; }
+    const h = t.closest('[data-hms]');
+    if (h) { e.preventDefault(); native.openUrl(`https://e.bambulab.com/index.php?e=${h.dataset.hms.replace(/_/g, '')}&s=device_hms&lang=en`); }
+  });
+  await draw();
+  timer = setInterval(draw, 2000);
 }
 
 function printerDialog() {
@@ -854,7 +892,7 @@ function renderShell() {
   };
   $('#addfiles').onchange = (e) => { importFiles([...e.target.files]); e.target.value = ''; };
 
-  $('#ppill').onclick = () => printerDialog();
+  $('#ppill').onclick = () => (native && native.sync.printer && S.sync && Object.keys(S.sync.printers || {}).length ? printerScreen() : printerDialog());
   $('#settings').onclick = () => printerDialog();
   markSettingsUpdate();
   if (native && native.onOpenSettings) native.onOpenSettings(() => printerDialog());
