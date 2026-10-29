@@ -311,7 +311,7 @@ async function printerScreen(serial) {
   let cur = serial || (list.find((p) => ['running', 'pause', 'prepare'].includes((S.sync.printers[p.serial] || {}).state)) || list[0]).serial;
   const d = document.createElement('div');
   d.className = 'dialog';
-  d.innerHTML = `<div class="box printer-screen"><div class="pr-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-body"><div class="spin"></div></div></div>`;
+  d.innerHTML = `<div class="box printer-screen"><div class="ps-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-body"><div class="spin"></div></div></div>`;
   document.body.appendChild(d);
   let timer = null;
   const close = () => { clearInterval(timer); d.remove(); document.removeEventListener('keydown', onKey); };
@@ -544,7 +544,7 @@ async function nativeSettings() {
 
     ${st.mode !== 'off' ? `<div class="section-title">מדפסות</div>
       ${printers.length ? printers.map((p, i) => `<div class="printer-row">
-        <div class="pr-head">${I.printer}<b>${esc(p.name || p.serial)}</b><span class="mono" style="color:var(--ink3)">${esc(p.model || '')} · ${esc(p.serial)}</span><button class="btn small ghost danger" data-rmp="${i}" style="margin-inline-start:auto">הסר</button></div>
+        <div class="pr-head">${I.printer}<b>${esc(p.name || p.serial)}</b><span class="mono" style="color:var(--ink3)">${esc(p.model || '')} · ${esc(p.serial)}</span>${native.sync.printer && S.sync && (S.sync.printers || {})[p.serial] ? `<button class="btn small" data-openps="${esc(p.serial)}" style="margin-inline-start:auto">מסך המדפסת</button>` : ''}<button class="btn small ghost danger" data-rmp="${i}" style="${native.sync.printer && S.sync && (S.sync.printers || {})[p.serial] ? '' : 'margin-inline-start:auto'}">הסר</button></div>
         ${usesLan ? `<div class="form-grid"><div><label>IP</label><input class="inp ltr" data-pf="ip" data-i="${i}" value="${esc(p.ip || '')}" placeholder="192.168.1.50"></div><div><label>Access Code</label><input class="inp ltr" data-pf="access_code" data-i="${i}" value="${esc(p.access_code || '')}"></div></div>` : ''}
       </div>`).join('') : `<div class="hint">${usesCloud ? 'אחרי ההתחברות המדפסות מהחשבון יופיעו כאן.' : 'עוד אין מדפסות.'}</div>`}
       ${usesLan ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-discover>${I.search}חפש מדפסות ברשת</button><button class="btn small ghost" data-addp>${I.plus}הוסף ידנית</button></div>
@@ -629,6 +629,8 @@ async function nativeSettings() {
       draw();
       return;
     }
+    const ops = t.closest('[data-openps]');
+    if (ops) { box.remove(); printerScreen(ops.dataset.openps); return; }
     const rm = t.closest('[data-rmp]');
     if (rm) { collect(); printers.splice(+rm.dataset.rmp, 1); draw(); return; }
     if (t.closest('[data-gdin]')) {
@@ -899,6 +901,8 @@ function renderShell() {
   if (!document.__settingsKey) { document.__settingsKey = 1; document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === ',' && !(native && navigator.platform.startsWith('Mac'))) { e.preventDefault(); printerDialog(); } }); }
   $('#side').addEventListener('click', (e) => {
     if (e.target.closest('[data-printer]')) { printerDialog(); return; }
+    const ps = e.target.closest('[data-pscreen]');
+    if (ps) { printerScreen(ps.dataset.pscreen); return; }
     const b = e.target.closest('[data-nav]');
     if (!b) return;
     const [kind, val] = [b.dataset.nav, b.dataset.val];
@@ -998,7 +1002,8 @@ function renderSidebar() {
     </div>
     <h4>הדפסות</h4>
     ${pv.map(nav).join('')}
-    <button class="nav-item" data-printer style="margin-top:2px">${I.printer}<span class="lbl">הגדרות וחיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
+    ${native && native.sync.printer ? Object.entries((S.sync && S.sync.printers) || {}).map(([sn, p]) => `<button class="nav-item" data-pscreen="${esc(sn)}" title="מסך המדפסת: טמפרטורות, AMS, תקלות וסטטיסטיקה">${I.printer}<span class="lbl">${esc(p.name || sn)}</span><span class="count"><span class="pdot ${['running', 'prepare'].includes(p.state) ? 'run' : p.conn === 'offline' || p.conn === 'error' ? 'off' : 'idle'}"></span></span></button>`).join('') : ''}
+    <button class="nav-item" data-printer style="margin-top:2px">${I.gear}<span class="lbl">הגדרות וחיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
     <h4>תיקייה</h4>
     ${fv.map(nav).join('')}
     ${folderList.length > 1 ? folderList.map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}
