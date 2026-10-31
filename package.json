@@ -40,10 +40,13 @@
         "zip"
       ],
       "icon": "build/icon.png",
-      "identity": "-",
+      "identity": null,
       "artifactName": "PrintLog-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "PrintLog connects to your Bambu Lab printer on the local network (LAN mode) to show live print status."
+      }
     },
     "dmg": {
       "title": "PrintLog ${version}"
@@ -74,7 +77,8 @@
       ],
       "category": "Utility",
       "artifactName": "PrintLog-${version}-linux.${ext}"
-    }
+    },
+    "afterPack": "build/adhoc-sign.js"
   },
   "repository": {
     "type": "git",
