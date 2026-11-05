@@ -1,6 +1,7 @@
 // Google Drive archive: OAuth (loopback + PKCE) and file upload/download with the Drive v3 API.
 // Scope 'drive.file' = the app only sees files it created itself.
 'use strict';
+const { _t, getLang } = require('./i18n');
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -14,6 +15,7 @@ const API = TB ? TB + '/drive/v3' : 'https://www.googleapis.com/drive/v3';
 const UPLOAD = TB ? TB + '/upload/drive/v3' : 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_NAME = 'PrintLog Archive';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// translated when thrown: the language can change while the app runs
 const NO_SCOPE_MSG = 'Google לא נתנו ל-PrintLog הרשאה לקבצים ב-Drive. בחלון ההתחברות של Google צריך לסמן את התיבה של Google Drive ("לראות, לערוך, ליצור ולמחוק רק את הקבצים הספציפיים…"). התחבר שוב בהגדרות וסמן אותה.';
 
 function loadClient(dir) {
@@ -44,7 +46,7 @@ class GDrive {
         if (u.pathname !== '/') { res.writeHead(404); res.end(); return; }
         const ok = u.searchParams.get('state') === state && u.searchParams.get('code');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<!doctype html><html dir="rtl" lang="he"><body style="font-family:system-ui;text-align:center;padding:60px">${ok ? '<h2>PrintLog מחובר ל-Google Drive ✓</h2><p>אפשר לסגור את החלון ולחזור לאפליקציה.</p>' : '<h2>ההתחברות בוטלה</h2>'}</body></html>`);
+        res.end(`<!doctype html><html dir="${getLang() === 'en' ? 'ltr' : 'rtl'}" lang="${getLang()}"><body style="font-family:system-ui;text-align:center;padding:60px">${ok ? _t('<h2>PrintLog מחובר ל-Google Drive ✓</h2><p>אפשר לסגור את החלון ולחזור לאפליקציה.</p>') : _t('<h2>ההתחברות בוטלה</h2>')}</body></html>`);
         clearTimeout(timer);
         srv.close();
         if (ok) resolve({ code: u.searchParams.get('code'), redirect: `http://127.0.0.1:${srv.address() ? srv.address().port : port}` });
@@ -62,11 +64,11 @@ class GDrive {
       });
     });
     const tok = await this.tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier });
-    if (!tok.refresh_token) throw new Error('Google לא החזירו אישור קבוע. נסה שוב.');
+    if (!tok.refresh_token) throw new Error(_t('Google לא החזירו אישור קבוע. נסה שוב.'));
     // Google lets the user untick individual permissions on the consent screen
     if (tok.scope && !tok.scope.split(' ').includes(DRIVE_SCOPE)) {
       fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(tok.refresh_token), { method: 'POST' }).catch(() => {});
-      throw new Error(NO_SCOPE_MSG);
+      throw new Error(_t(NO_SCOPE_MSG));
     }
     let email = '';
     try { email = JSON.parse(Buffer.from(tok.id_token.split('.')[1], 'base64url').toString()).email || ''; } catch { }
@@ -85,7 +87,7 @@ class GDrive {
     const r = await fetch(TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(20000) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      if (j.error === 'invalid_grant') { this.setAuth(null); throw new Error('החיבור ל-Google Drive פג. צריך להתחבר מחדש בהגדרות.'); }
+      if (j.error === 'invalid_grant') { this.setAuth(null); throw new Error(_t('החיבור ל-Google Drive פג. צריך להתחבר מחדש בהגדרות.')); }
       throw new Error(`Google: ${j.error_description || j.error || r.status}`);
     }
     return j;
@@ -93,7 +95,7 @@ class GDrive {
   async token() {
     if (this.access && Date.now() < this.access.exp) return this.access.token;
     const a = this.getAuth();
-    if (!a || !a.refresh) throw new Error('לא מחובר ל-Google Drive');
+    if (!a || !a.refresh) throw new Error(_t('לא מחובר ל-Google Drive'));
     const j = await this.tokenRequest({ grant_type: 'refresh_token', refresh_token: a.refresh });
     this.access = { token: j.access_token, exp: Date.now() + (j.expires_in - 60) * 1000 };
     return this.access.token;
@@ -105,7 +107,7 @@ class GDrive {
       if (r.status === 401 && attempt === 0) { this.access = null; continue; }
       if (r.status === 403) {
         const txt = await r.text();
-        if (/insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/i.test(txt)) { this.access = null; this.setAuth(null); throw new Error(NO_SCOPE_MSG); }
+        if (/insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/i.test(txt)) { this.access = null; this.setAuth(null); throw new Error(_t(NO_SCOPE_MSG)); }
         throw new Error(`Google Drive: 403 ${txt.slice(0, 200)}`);
       }
       if ((r.status === 429 || r.status >= 500) && attempt < 2) { await new Promise((s) => setTimeout(s, 1500 * (attempt + 1))); continue; }
@@ -137,12 +139,12 @@ class GDrive {
     });
     const session = init.headers.get('location');
     const r = await fetch(session, { method: 'PUT', headers: { 'Content-Length': String(stat.size), 'Content-Type': 'application/octet-stream' }, body: fs.readFileSync(localPath), signal: AbortSignal.timeout(30 * 60 * 1000) });
-    if (!r.ok) throw new Error(`ההעלאה נכשלה (${r.status})`);
+    if (!r.ok) throw new Error(_t`ההעלאה נכשלה (${r.status})`);
     const { id } = await r.json();
     const meta = await this.api('GET', `${API}/files/${id}?fields=id,size,md5Checksum`);
     if (+meta.size !== stat.size || (meta.md5Checksum && meta.md5Checksum !== md5)) {
       await this.api('DELETE', `${API}/files/${id}`).catch(() => {});
-      throw new Error('הקובץ שהועלה לא זהה למקור, לא נמחק כלום');
+      throw new Error(_t('הקובץ שהועלה לא זהה למקור, לא נמחק כלום'));
     }
     return { id, size: stat.size, mtime: Math.round(stat.mtimeMs) };
   }

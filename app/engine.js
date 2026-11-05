@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
 const { syncPrinter: syncTimelapse } = require('./timelapse');
+const { _t } = require('./i18n');
 
 const API = {
   login: 'https://api.bambulab.com/v1/user-service/user/login',
@@ -68,27 +69,27 @@ class BambuCloud {
     try {
       r = await fetch(url, { method, headers: headers || this.headers(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(25000) });
       txt = await r.text();
-    } catch (e) { throw new CloudError(`אין חיבור לענן של Bambu (${e.cause?.code || e.message})`); }
+    } catch (e) { throw new CloudError(_t`אין חיבור לענן של Bambu (${e.cause?.code || e.message})`); }
     let j = {};
     try { j = txt ? JSON.parse(txt) : {}; } catch { }
     if (r.ok) return { status: r.status, json: j, res: r };
     const cf = /cloudflare/i.test(txt);
-    if (r.status === 401 || (r.status === 403 && !cf && this.token)) throw new AuthExpired('Bambu דחו את החיבור השמור. צריך להתחבר מחדש בהגדרות.');
-    if (r.status === 403 && cf) throw new CloudError('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.');
+    if (r.status === 401 || (r.status === 403 && !cf && this.token)) throw new AuthExpired(_t('Bambu דחו את החיבור השמור. צריך להתחבר מחדש בהגדרות.'));
+    if (r.status === 403 && cf) throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'));
     if (r.status === 400 && allow400) return { status: 400, json: j, res: r };
-    throw new CloudError(`שגיאה מהענן (HTTP ${r.status})`);
+    throw new CloudError(_t`שגיאה מהענן (HTTP ${r.status})`);
   }
   async loginPassword(email, password) {
     const { status, json } = await this.req('POST', this.url('login'), { account: email, password, apiError: '' }, this.headers(false), true);
-    if (status === 400) throw new CloudError('מייל או סיסמה שגויים');
+    if (status === 400) throw new CloudError(_t('מייל או סיסמה שגויים'));
     return json;
   }
   async sendEmailCode(email) { await this.req('POST', this.url('emailCode'), { email, type: 'codeLogin' }, this.headers(false)); }
   async loginCode(email, code) {
     const { status, json } = await this.req('POST', this.url('login'), { account: email, code }, this.headers(false), true);
     if (status === 400) {
-      if (json.code === 1) { await this.sendEmailCode(email).catch(() => {}); throw new CloudError('הקוד פג תוקף. שלחנו קוד חדש למייל.'); }
-      throw new CloudError('קוד שגוי');
+      if (json.code === 1) { await this.sendEmailCode(email).catch(() => {}); throw new CloudError(_t('הקוד פג תוקף. שלחנו קוד חדש למייל.')); }
+      throw new CloudError(_t('קוד שגוי'));
     }
     return json.accessToken || '';
   }
@@ -100,10 +101,10 @@ class BambuCloud {
     const h = this.headers(false);
     if (csrf) { h['x-bbl-csrf-token'] = csrf; h.Cookie = `bbl_csrf_token=${csrf}`; }
     const r = await fetch(this.url('tfa'), { method: 'POST', headers: h, body: JSON.stringify({ tfaKey, tfaCode: code }) });
-    if (!r.ok) throw new CloudError('קוד האימות לא התקבל');
+    if (!r.ok) throw new CloudError(_t('קוד האימות לא התקבל'));
     const set = r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie') || ''];
     for (const ck of set) { const m = /(?:^|\s)token=([^;]+)/.exec(ck || ''); if (m) return m[1]; }
-    throw new CloudError('ההתחברות הדו-שלבית נכשלה');
+    throw new CloudError(_t('ההתחברות הדו-שלבית נכשלה'));
   }
   async userId() {
     const parts = this.token.split('.');
@@ -111,7 +112,7 @@ class BambuCloud {
       try { const u = JSON.parse(Buffer.from(parts[1], 'base64url').toString()).username; if (u) return u; } catch { }
     }
     const { json } = await this.req('GET', this.url('preference'));
-    if (!json.uid) throw new CloudError('לא הצלחנו לזהות את המשתמש');
+    if (!json.uid) throw new CloudError(_t('לא הצלחנו לזהות את המשתמש'));
     return `u_${json.uid}`;
   }
   // the 3MF behind a print: the cloud project it was sent from, or the MakerWorld profile
@@ -147,7 +148,7 @@ class BambuCloud {
         if (url) return { url, via: 'makerworld', name: json.name || '' };
       } catch (err) { tried.push(`instance ${id}:` + err.message); }
     }
-    throw new CloudError(`Bambu לא החזירו קובץ להדפסה הזו (${tried.join('; ') || 'אין מזהה'})`);
+    throw new CloudError(_t`Bambu לא החזירו קובץ להדפסה הזו (${tried.join('; ') || _t('אין מזהה')})`);
   }
   async devices() { return (await this.req('GET', this.url('bind'))).json.devices || []; }
   async tasks(knownIds) {
@@ -264,14 +265,15 @@ function hmsCode(attr, code) {
   const s = h(attr) + h(code);
   return s.match(/.{4}/g).join('_');
 }
+// translated when used: the language can change while the app runs
 const HMS_MODULE = { '03': 'תקלה במערכת התנועה', '05': 'תקלה בלוח הראשי', '07': 'תקלה ב-AMS', '08': 'תקלה בראש ההדפסה', '0C': 'תקלה במצלמה או בחיישנים', '12': 'תקלה ב-AMS Lite', '18': 'תקלה ב-AMS HT' };
-const hmsText = (codeStr) => HMS_MODULE[codeStr.slice(0, 2)] || 'תקלה במדפסת';
+const hmsText = (codeStr) => _t(HMS_MODULE[codeStr.slice(0, 2)] || 'תקלה במדפסת');
 const hmsUrl = (codeStr) => `https://e.bambulab.com/index.php?e=${codeStr.replace(/_/g, '')}&s=device_hms&lang=en`;
 function printErrorText(err) {
   const n = +err || 0;
   if (!n) return '';
-  if ((n & 0xffff) === 0x8011) return 'הפילמנט נגמר';
-  return 'שגיאה ' + (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  if ((n & 0xffff) === 0x8011) return _t('הפילמנט נגמר');
+  return _t('שגיאה ') + (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
 }
 
 class LiveWatcher {
@@ -281,7 +283,7 @@ class LiveWatcher {
     if (!this.onAlert) return;
     const f = this.full || {};
     const st = String(f.gcode_state || '').toUpperCase();
-    const job = f.subtask_name || f.gcode_file || 'הדפסה';
+    const job = f.subtask_name || f.gcode_file || _t('הדפסה');
     const first = !this.seeded; // the first report only records what is already true, so starting the app mid-print is quiet
     this.seeded = true;
     const jobId = `${f.task_id || f.subtask_id || job}|${f.gcode_start_time || ''}`;
@@ -296,28 +298,28 @@ class LiveWatcher {
     this.hmsSeen = this.hmsSeen || new Set();
     const fresh = hms.filter((c) => !this.hmsSeen.has(c));
     if (st === 'PAUSE' && this.lastSt && this.lastSt !== 'PAUSE') {
-      const why = fresh[0] ? `${hmsText(fresh[0])} (קוד ${fresh[0]})` : printErrorText(f.print_error) || 'נעצרה במדפסת';
-      fire('pause', 'ההדפסה הושהתה', `${job} · ${why}`, fresh[0] ? hmsUrl(fresh[0]) : '');
+      const why = fresh[0] ? _t`${hmsText(fresh[0])} (קוד ${fresh[0]})` : printErrorText(f.print_error) || _t('נעצרה במדפסת');
+      fire('pause', _t('ההדפסה הושהתה'), `${job} · ${why}`, fresh[0] ? hmsUrl(fresh[0]) : '');
       fresh.splice(0, 1).forEach((c) => this.hmsSeen.add(c)); // the first code is already in this message
     }
-    for (const c of fresh) { this.hmsSeen.add(c); fire('pause', hmsText(c), `קוד ${c} · ${job}`, hmsUrl(c)); }
+    for (const c of fresh) { this.hmsSeen.add(c); fire('pause', hmsText(c), _t`קוד ${c} · ${job}`, hmsUrl(c)); }
     if (!hms.length) this.hmsSeen.clear();
     // 2. first layer done
-    if (running && +f.layer_num >= 2 && !J.firstLayer) { J.firstLayer = 1; fire('firstLayer', 'השכבה הראשונה הסתיימה', `כדאי לבדוק שההדפסה נדבקה · ${job}`); }
+    if (running && +f.layer_num >= 2 && !J.firstLayer) { J.firstLayer = 1; fire('firstLayer', _t('השכבה הראשונה הסתיימה'), _t`כדאי לבדוק שההדפסה נדבקה · ${job}`); }
     // 3. ten minutes left (only for prints longer than 20 minutes)
-    if (running && remain > 0 && remain <= 10 && (this.maxRemain || 0) >= 20 && !J.tenMin) { J.tenMin = 1; fire('tenMin', 'נשארו 10 דקות להדפסה', job); }
+    if (running && remain > 0 && remain <= 10 && (this.maxRemain || 0) >= 20 && !J.tenMin) { J.tenMin = 1; fire('tenMin', _t('נשארו 10 דקות להדפסה'), job); }
     // 4. AMS: a spool about to run out, or humid air
     this.amsFlags = this.amsFlags || {};
     const A = this.amsFlags;
     for (const u of (f.ams && Array.isArray(f.ams.ams) ? f.ams.ams : [])) {
       for (const t of (Array.isArray(u.tray) ? u.tray : [])) {
         const k = `low:${u.id}:${t.id}`, r = t.remain == null ? -1 : +t.remain;
-        if (t.tray_type && r >= 0 && r <= 10) { if (!A[k]) { A[k] = 1; this.onAlert({ kind: 'ams', title: 'הפילמנט ב-AMS עומד להיגמר', body: `AMS ${+u.id + 1} · חריץ ${+t.id + 1}: ${t.tray_type}${t.tray_sub_brands ? ' ' + t.tray_sub_brands : ''} · נשארו ${r}%`, printer: this.name }); } }
+        if (t.tray_type && r >= 0 && r <= 10) { if (!A[k]) { A[k] = 1; this.onAlert({ kind: 'ams', title: _t('הפילמנט ב-AMS עומד להיגמר'), body: _t`AMS ${+u.id + 1} · חריץ ${+t.id + 1}: ${t.tray_type}${t.tray_sub_brands ? ' ' + t.tray_sub_brands : ''} · נשארו ${r}%`, printer: this.name }); } }
         else if (r > 20) delete A[k];
       }
       const raw = u.humidity_raw != null ? +u.humidity_raw : null;
       const hk = `hum:${u.id}`;
-      if (raw != null && raw >= 45) { if (!A[hk]) { A[hk] = 1; this.onAlert({ kind: 'ams', title: 'לחות גבוהה ב-AMS', body: `AMS ${+u.id + 1}: לחות ${raw}% · כדאי לייבש או להחליף חומר סופח`, printer: this.name }); } }
+      if (raw != null && raw >= 45) { if (!A[hk]) { A[hk] = 1; this.onAlert({ kind: 'ams', title: _t('לחות גבוהה ב-AMS'), body: _t`AMS ${+u.id + 1}: לחות ${raw}% · כדאי לייבש או להחליף חומר סופח`, printer: this.name }); } }
       else if (raw != null && raw < 38) delete A[hk];
     }
     this.lastSt = st;
@@ -435,7 +437,7 @@ function startMqtt({ host, port = 8883, user, password, serials, watchers, insec
           c.publish(`device/${s}/request`, JSON.stringify({ info: { sequence_id: '1', command: 'get_version' } }));
         });
       } else {
-        const reason = { 4: 'Access Code / חיבור שגוי', 5: 'אין הרשאה' }[rc] || `קוד ${rc}`;
+        const reason = { 4: _t('Access Code / חיבור שגוי'), 5: _t('אין הרשאה') }[rc] || _t`קוד ${rc}`;
         log(`${label}: refused (${reason})`);
         serials.filter(accept).forEach((s) => out.setPrinter(s, { conn: 'error', error: reason }, false));
       }
@@ -633,7 +635,7 @@ class Engine {
         this.clients.push(startMqtt({ host: p.ip, user: 'bblp', password: p.access_code, serials: [p.serial], watchers: w, insecure: true, label: `${p.name} (LAN)`, out, log: this.log, onState, accept: () => !both || w[p.serial].lanUp }));
         if (both) viaCloud.push(p);
       } else if (cfg.mode !== 'lan') viaCloud.push(p);
-      else { this.log(`live: ${p.name} skipped - no IP / access code`); out.setPrinter(p.serial, { name: p.name, conn: 'error', error: 'חסרים IP או Access Code' }, false); }
+      else { this.log(`live: ${p.name} skipped - no IP / access code`); out.setPrinter(p.serial, { name: p.name, conn: 'error', error: _t('חסרים IP או Access Code') }, false); }
     }
     if (viaCloud.length && cloudOk) {
       const ws = Object.fromEntries(viaCloud.map((p) => [p.serial, this.watchers[p.serial] || new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
@@ -764,16 +766,16 @@ class Engine {
   }
   async doFetchModel(key, onProgress = () => {}) {
     const cfg = this.getConfig();
-    if (!cfg.cloud || !cfg.cloud.token) throw new CloudError('צריך להתחבר ל-Bambu בהגדרות');
-    if (!this.out) throw new CloudError('הסנכרון לא פועל');
+    if (!cfg.cloud || !cfg.cloud.token) throw new CloudError(_t('צריך להתחבר ל-Bambu בהגדרות'));
+    if (!this.out) throw new CloudError(_t('הסנכרון לא פועל'));
     const e = this.out.data.prints.find((p) => p.key === key || (p.aliasKeys || []).includes(key));
-    if (!e) throw new CloudError('ההדפסה לא נמצאה');
+    if (!e) throw new CloudError(_t('ההדפסה לא נמצאה'));
     const have = this.existingModel(e);
     if (have) { e.modelFile = have; return { path: have, reused: true }; }
     const cloud = new BambuCloud(cfg.cloud.region, cfg.cloud.token);
     const { url, name } = await cloud.modelUrl(e, (m) => this.log(m));
     const r = await fetch(url, { signal: AbortSignal.timeout(20 * 60 * 1000) });
-    if (!r.ok || !r.body) throw new CloudError(`ההורדה נכשלה (HTTP ${r.status})`);
+    if (!r.ok || !r.body) throw new CloudError(_t`ההורדה נכשלה (HTTP ${r.status})`);
     const total = +r.headers.get('content-length') || 0;
     const ext = /\.gcode\.3mf(\?|$)/i.test(url) ? '.gcode.3mf' : '.3mf';
     const base = String(name || e.design || e.title || `print-${e.key}`).replace(/\.(gcode\.)?3mf$/i, '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim().slice(0, 100) || 'model';
@@ -792,7 +794,7 @@ class Engine {
       }
       await new Promise((res, rej) => out.end((err) => (err ? rej(err) : res())));
     } catch (err) { out.destroy(); try { fs.unlinkSync(part); } catch { } throw err; }
-    if (got < 100 || !head || head[0] !== 0x50 || head[1] !== 0x4b) { try { fs.unlinkSync(part); } catch { } throw new CloudError('הקובץ שהתקבל הוא לא 3MF'); }
+    if (got < 100 || !head || head[0] !== 0x50 || head[1] !== 0x4b) { try { fs.unlinkSync(part); } catch { } throw new CloudError(_t('הקובץ שהתקבל הוא לא 3MF')); }
     let file = path.join(dir, base + ext);
     for (let i = 2; fs.existsSync(file) && fs.statSync(file).size !== got; i++) file = path.join(dir, `${base} (${i})${ext}`);
     if (fs.existsSync(file)) fs.unlinkSync(part); else fs.renameSync(part, file);
@@ -852,22 +854,22 @@ class Engine {
     try {
       // accounts opened with Google / Apple / Facebook have no password: sign in with a code sent by email
       if (codeOnly) {
-        if (!email) return { error: 'צריך למלא מייל' };
+        if (!email) return { error: _t('צריך למלא מייל') };
         await cloud.sendEmailCode(email); this.pendingLogin = { cloud, email }; return { need: 'code' };
       }
       const j = await cloud.loginPassword(email, password);
       if (j.accessToken) return this.finishLogin(cloud, email, j.accessToken);
       if (j.loginType === 'verifyCode') { await cloud.sendEmailCode(email); this.pendingLogin = { cloud, email }; return { need: 'code' }; }
       if (j.loginType === 'tfa') { this.pendingLogin = { cloud, email, tfaKey: j.tfaKey }; return { need: 'tfa' }; }
-      return { error: 'תגובה לא מוכרת מהענן' };
+      return { error: _t('תגובה לא מוכרת מהענן') };
     } catch (e) { return { error: e.message }; }
   }
   async verify({ step, code }) {
     const p = this.pendingLogin;
-    if (!p) return { error: 'צריך להתחיל את ההתחברות מחדש' };
+    if (!p) return { error: _t('צריך להתחיל את ההתחברות מחדש') };
     try {
       const token = step === 'tfa' ? await p.cloud.loginTfa(p.tfaKey, code) : await p.cloud.loginCode(p.email, code);
-      if (!token) return { error: 'ההתחברות נכשלה' };
+      if (!token) return { error: _t('ההתחברות נכשלה') };
       return this.finishLogin(p.cloud, p.email, token);
     } catch (e) { return { error: e.message }; }
   }

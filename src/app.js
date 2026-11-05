@@ -1,3 +1,4 @@
+import { _t, tx, loc, getLang } from './i18n.js';
 import { Library, kvGet, kvSet, uid, baseName, dirName, stripExt, prettyName } from './store.js';
 import { parseModel, read3MFMeta, fileKind } from './parse.js';
 import { printerScreenHTML } from './printer.js';
@@ -49,14 +50,14 @@ function hueFor(tag) {
   for (const c of tag) h = (h * 31 + c.charCodeAt(0)) % 360;
   return h;
 }
-const tagHTML = (t, removable) => `<span class="tag" style="--h:${hueFor(t)}">${esc(t)}${removable ? `<button data-rmtag="${esc(t)}" title="הסר">×</button>` : ''}</span>`;
+const tagHTML = (t, removable) => `<span class="tag" style="--h:${hueFor(t)}">${esc(t)}${removable ? _t`<button data-rmtag="${esc(t)}" title="הסר">×</button>` : ''}</span>`;
 const fmtBytes = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB');
-const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
-const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? `${h} ש׳${m ? ` ${m} ד׳` : ''}` : `${m} ד׳`; };
+const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
+const fmtDur = (sec) => { if (!sec) return ''; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h ? _t`${h} ש׳${m ? _t` ${m} ד׳` : ''}` : _t`${m} ד׳`; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-const dispPath = (p) => (String(p).startsWith('@models/') ? '⬇ Bambu / ' + p.slice(8) : String(p).startsWith('@archive/') ? '☁ ארכיון/' + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
+const dispPath = (p) => (String(p).startsWith('@models/') ? '⬇ Bambu / ' + p.slice(8) : String(p).startsWith('@archive/') ? _t('☁ ארכיון/') + p.slice(9) : String(p).startsWith('@gdrive/') ? '☁ Google Drive/' + p.split('/').slice(2).join('/') : p);
 const isArchived = (p) => /^@(archive|gdrive)\//.test(p);
-const RESULT = { ok: 'הצליחה', partial: 'חלקית', fail: 'נכשלה', cancel: 'בוטלה' };
+const RESULT = { ok: _t('הצליחה'), partial: _t('חלקית'), fail: _t('נכשלה'), cancel: _t('בוטלה') };
 // build plates of the model's current file (each plate = a separate print)
 function platesOf(m) { return (lib.data.files[(m.versions.find((v) => v.path === m.current) || m.versions[m.versions.length - 1]).path]?.meta?.plates) || []; }
 function plateStatus(m) {
@@ -69,10 +70,13 @@ function plateStatus(m) {
   return res;
 }
 
+// language picker: each language named in itself, so it reads the same in both
+const LANG_ROW = () => `<div class="field" style="display:flex;align-items:center;gap:10px;margin:4px 0 8px"><label style="margin:0">שפה · Language</label><select class="inp" id="olang" style="width:auto">${[['he', 'עברית'], ['en', 'English']].map(([k, l]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+
 function toast(msg, err) {
   const t = document.createElement('div');
   t.className = 'toast' + (err ? ' err' : '');
-  t.textContent = msg;
+  t.textContent = tx(msg);
   $('#toasts').appendChild(t);
   setTimeout(() => t.remove(), err ? 6000 : 3200);
 }
@@ -105,7 +109,7 @@ function parseAsync(name, buf, opts = {}, tag = '') {
     parses.add(job);
     const done = () => { parses.delete(job); w.terminate(); };
     w.onmessage = (e) => { done(); if (e.data.ok) resolve(e.data.r); else reject(new Error(e.data.error)); };
-    w.onerror = (e) => { done(); reject(new Error(e.message || 'העיבוד נכשל')); };
+    w.onerror = (e) => { done(); reject(new Error(e.message || _t('העיבוד נכשל'))); };
     w.postMessage({ name, buf, opts }, [buf]);
   });
 }
@@ -153,18 +157,18 @@ async function boot() {
   }
   const supported = !!native || 'showDirectoryPicker' in window;
   const saved = !native && supported ? await kvGet('root') : null;
-  root.innerHTML = `
+  root.innerHTML = _t`
   <section id="welcome"><div class="welcome-card">
     <div class="logo"><span class="logo-mark">${I.mark}</span>PrintLog</div>
     <h1>כל המודלים שלך, במקום אחד.</h1>
-    <p>${native ? 'כל ההדפסות שלך מ-Bambu, עם תצוגה בתלת-ממד, תגיות והערות. איך להתחיל?' : 'בוחרים פעם אחת את תיקיית ה-STL וה-3MF. PrintLog סורק אותה, מציג כל מודל בתלת-ממד, ושומר תגיות, הערות, גרסאות ויומן הדפסות בתוך התיקייה עצמה.'}</p>
+    <p>${native ? _t('כל ההדפסות שלך מ-Bambu, עם תצוגה בתלת-ממד, תגיות והערות. איך להתחיל?') : _t('בוחרים פעם אחת את תיקיית ה-STL וה-3MF. PrintLog סורק אותה, מציג כל מודל בתלת-ממד, ושומר תגיות, הערות, גרסאות ויומן הדפסות בתוך התיקייה עצמה.')}</p>
     <div class="welcome-actions">
-      ${native ? `<div class="start-choices">
+      ${native ? _t`<div class="start-choices">
         <button class="choice" id="cloudonly"><span class="ci">${I.cloud}</span><b>הצג את ההדפסות שלי מ-Bambu</b><span>מתחברים לחשבון Bambu ורואים את כל ההיסטוריה בתלת-ממד. בלי לבחור תיקייה.</span></button>
         <button class="choice" id="pick"><span class="ci">${I.folder}</span><b>בחר תיקיית מודלים</b><span>יש לך תיקייה עם קבצי STL / 3MF? PrintLog יסרוק אותה ויחבר אליה את ההדפסות.</span></button>
-      </div>` : supported ? (saved ? `<button class="btn primary" id="resume">${I.folder} המשך עם „${esc(saved.name)}”</button><button class="btn ghost" id="pick">בחר תיקייה אחרת</button>` : `<button class="btn primary" id="pick">${I.folder} בחר תיקיית מודלים</button>`) : ''}
+      </div>` : supported ? (saved ? _t`<button class="btn primary" id="resume">${I.folder} המשך עם „${esc(saved.name)}”</button><button class="btn ghost" id="pick">בחר תיקייה אחרת</button>` : _t`<button class="btn primary" id="pick">${I.folder} בחר תיקיית מודלים</button>`) : ''}
     </div>
-    ${supported ? '' : `<div class="notice">הדפדפן הזה לא תומך בגישה לתיקיות. פתח את הקובץ ב-<b>Google Chrome</b> או ב-<b>Microsoft Edge</b> (במק או בווינדוס).</div>`}
+    ${supported ? '' : _t`<div class="notice">הדפדפן הזה לא תומך בגישה לתיקיות. פתח את הקובץ ב-<b>Google Chrome</b> או ב-<b>Microsoft Edge</b> (במק או בווינדוס).</div>`}
     <div class="feature-row">
       <div class="feature"><b>תצוגה בתלת-ממד</b>STL ו-3MF, כולל צבעי פילמנט ותמונת הפלטה של Bambu.</div>
       <div class="feature"><b>יומן הדפסות</b>הצליח / נכשל, עם ההגדרות שנשלפות מקובץ ה-3MF.</div>
@@ -181,7 +185,7 @@ async function boot() {
       const dir = await window.showDirectoryPicker({ id: 'shelf-root', mode: 'readwrite' });
       await kvSet('root', dir);
       openLibrary(dir);
-    } catch (e) { if (e.name !== 'AbortError') toast('לא ניתן לפתוח את התיקייה: ' + e.message, true); }
+    } catch (e) { if (e.name !== 'AbortError') toast(_t('לא ניתן לפתוח את התיקייה: ') + e.message, true); }
   };
   $('#pick') && ($('#pick').onclick = pick);
   $('#cloudonly') && ($('#cloudonly').onclick = async () => {
@@ -194,7 +198,7 @@ async function boot() {
     try {
       const p = await saved.requestPermission({ mode: 'readwrite' });
       if (p === 'granted') openLibrary(saved);
-      else toast('צריך לאשר גישה לתיקייה כדי להמשיך', true);
+      else toast(_t('צריך לאשר גישה לתיקייה כדי להמשיך'), true);
     } catch (e) { pick(); }
   });
 }
@@ -202,12 +206,12 @@ async function boot() {
 async function openLibrary(dir) {
   lib = new Library(dir);
   if (native) {
-    try { const st = await native.sync.getState(); S.archiveDir = st.archiveDir || ''; if (st.archiveDir) lib.archive = new NativeDirHandle('@archive', 'ארכיון'); } catch { }
+    try { const st = await native.sync.getState(); S.archiveDir = st.archiveDir || ''; if (st.archiveDir) lib.archive = new NativeDirHandle('@archive', _t('ארכיון')); } catch { }
     lib.models = new NativeDirHandle('@models', 'Bambu');
     try { S.gdrive = await native.gdrive.status(); } catch { S.gdrive = null; }
   }
-  try { await lib.init(); } catch (e) { toast('שגיאה בפתיחת הספרייה: ' + e.message, true); return; }
-  lib.on((t, e) => { if (t === 'save-error') toast('השמירה נכשלה: ' + (e && e.message), true); });
+  try { await lib.init(); } catch (e) { toast(_t('שגיאה בפתיחת הספרייה: ') + e.message, true); return; }
+  lib.on((t, e) => { if (t === 'save-error') toast(_t('השמירה נכשלה: ') + (e && e.message), true); });
   if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view;
   renderShell();
   await rescan(true);
@@ -227,16 +231,16 @@ async function openLibrary(dir) {
 async function rescan(first) {
   if (S.scanning) return;
   S.scanning = true;
-  setProgress('סורק את התיקייה…', null);
+  setProgress(_t('סורק את התיקייה…'), null);
   try {
-    const r = await lib.scan((n) => setProgress(`סורק… ${n} קבצים`, null));
+    const r = await lib.scan((n) => setProgress(_t`סורק… ${n} קבצים`, null));
     S.lastScan = Date.now();
     autoNames();
     renderAll();
-    if (!first && (r.added || r.moved)) toast(`${r.added ? r.added + ' מודלים חדשים' : ''}${r.added && r.moved ? ' · ' : ''}${r.moved ? r.moved + ' קבצים שהוזזו זוהו' : ''}`);
-    if (first && r.total === 0) toast('לא נמצאו קבצי STL או 3MF בתיקייה הזו');
+    if (!first && (r.added || r.moved)) toast(`${r.added ? r.added + _t(' מודלים חדשים') : ''}${r.added && r.moved ? ' · ' : ''}${r.moved ? r.moved + _t(' קבצים שהוזזו זוהו') : ''}`);
+    if (first && r.total === 0) toast(_t('לא נמצאו קבצי STL או 3MF בתיקייה הזו'));
   } catch (e) {
-    toast('הסריקה נכשלה: ' + e.message, true);
+    toast(_t('הסריקה נכשלה: ') + e.message, true);
   }
   S.scanning = false;
   setProgress(null);
@@ -255,7 +259,7 @@ async function syncPrints(force) {
     S.unmatched = r.unmatched;
     if (r.added || r.updated) {
       lib.save();
-      toast(r.added > 1 ? `נרשמו ${r.added} הדפסות מהמדפסת` : r.added ? 'נרשמה הדפסה חדשה מהמדפסת' : 'פרטי הדפסות עודכנו מהענן');
+      toast(r.added > 1 ? _t`נרשמו ${r.added} הדפסות מהמדפסת` : r.added ? _t('נרשמה הדפסה חדשה מהמדפסת') : _t('פרטי הדפסות עודכנו מהענן'));
     }
     if (r.added || r.updated || hadInbox !== r.unmatched.length) {
       renderSidebar();
@@ -267,7 +271,7 @@ async function syncPrints(force) {
   schedulePrefetch();
 }
 
-const PSTATE = { running: 'מדפיס', prepare: 'מתכונן', pause: 'מושהה', finish: 'סיים', failed: 'נכשל', idle: 'פנוי', slicing: 'פורס', offline: 'לא מחובר', error: 'שגיאת חיבור', unknown: 'לא ידוע', connecting: 'מתחבר…', silent: 'לא מגיבה (כבויה?)' };
+const PSTATE = { running: _t('מדפיס'), prepare: _t('מתכונן'), pause: _t('מושהה'), finish: _t('סיים'), failed: _t('נכשל'), idle: _t('פנוי'), slicing: _t('פורס'), offline: _t('לא מחובר'), error: _t('שגיאת חיבור'), unknown: _t('לא ידוע'), connecting: _t('מתחבר…'), silent: _t('לא מגיבה (כבויה?)') };
 function helperState() {
   const d = S.sync;
   if (!d) return { kind: 'none' };
@@ -282,11 +286,11 @@ function renderPrinterPill() {
   const el = $('#ppill');
   if (!el) return;
   const st = helperState();
-  if (st.kind === 'none') { el.innerHTML = `${I.printer}<span>חבר מדפסת</span>`; el.className = 'btn ghost ppill'; return; }
+  if (st.kind === 'none') { el.innerHTML = _t`${I.printer}<span>חבר מדפסת</span>`; el.className = 'btn ghost ppill'; return; }
   const printers = Object.values(S.sync.printers || {});
   let dot = 'idle', text = '';
-  if (st.kind === 'login') { dot = 'bad'; text = 'צריך להתחבר מחדש'; }
-  else if (st.kind === 'stale') { dot = 'off'; text = 'הסנכרון לא פועל'; }
+  if (st.kind === 'login') { dot = 'bad'; text = _t('צריך להתחבר מחדש'); }
+  else if (st.kind === 'stale') { dot = 'off'; text = _t('הסנכרון לא פועל'); }
   else if (printers.length) {
     const p = printers.find((x) => ['running', 'prepare', 'pause'].includes(x.state)) || printers[0];
     const live = Date.now() - (Date.parse(p.updated || '') || 0) < 10 * 60 * 1000;
@@ -294,8 +298,8 @@ function renderPrinterPill() {
     const quiet = !p.state || p.state === 'unknown';
     const state = p.conn === 'error' ? 'error' : !live || p.conn === 'offline' ? 'offline' : quiet ? (Date.now() - (Date.parse(S.sync.helper?.started || '') || 0) < 90000 ? 'connecting' : 'silent') : p.state;
     dot = state === 'running' || state === 'prepare' ? 'run' : state === 'failed' || state === 'error' ? 'bad' : state === 'offline' || state === 'silent' ? 'off' : 'idle';
-    text = `${p.name || 'מדפסת'} · ${PSTATE[state] || state}${state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${['running', 'pause', 'prepare'].includes(state) && p.job ? ` · ${p.job}` : ''}`;
-  } else { text = 'מסונכרן'; }
+    text = `${p.name || _t('מדפסת')} · ${PSTATE[state] || state}${state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${['running', 'pause', 'prepare'].includes(state) && p.job ? ` · ${p.job}` : ''}`;
+  } else { text = _t('מסונכרן'); }
   el.className = 'btn ppill';
   el.innerHTML = `<span class="pdot ${dot}"></span><span>${esc(text)}</span>`;
 }
@@ -304,9 +308,9 @@ function fmtAgo(iso) {
   const t = Date.parse(iso || '');
   if (!t) return '–';
   const m = Math.round((Date.now() - t) / 60000);
-  if (m < 1) return 'עכשיו';
-  if (m < 60) return `לפני ${m} דק׳`;
-  if (m < 60 * 24) return `לפני ${Math.round(m / 60)} שע׳`;
+  if (m < 1) return _t('עכשיו');
+  if (m < 60) return _t`לפני ${m} דק׳`;
+  if (m < 60 * 24) return _t`לפני ${Math.round(m / 60)} שע׳`;
   return fmtDate(iso);
 }
 
@@ -317,7 +321,7 @@ async function printerScreen(serial) {
   let cur = serial || (list.find((p) => ['running', 'pause', 'prepare'].includes((S.sync.printers[p.serial] || {}).state)) || list[0]).serial;
   const d = document.createElement('div');
   d.className = 'dialog';
-  d.innerHTML = `<div class="box printer-screen"><div class="ps-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-body"><div class="spin"></div></div></div>`;
+  d.innerHTML = _t`<div class="box printer-screen"><div class="ps-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-body"><div class="spin"></div></div></div>`;
   document.body.appendChild(d);
   let timer = null;
   const close = () => { clearInterval(timer); d.remove(); document.removeEventListener('keydown', onKey); };
@@ -326,7 +330,7 @@ async function printerScreen(serial) {
   const draw = async () => {
     const info = await native.sync.printer(cur).catch(() => null);
     if (!d.isConnected) return;
-    if (!info) { $('.pr-body', d).innerHTML = '<div class="hint">אין נתונים מהמדפסת.</div>'; return; }
+    if (!info) { $('.pr-body', d).innerHTML = _t('<div class="hint">אין נתונים מהמדפסת.</div>'); return; }
     $('[data-pname]', d).textContent = info.name;
     $('.pr-tabs', d).innerHTML = list.length > 1 ? list.map((p) => `<button class="btn small ${p.serial === cur ? 'on' : 'ghost'}" data-ptab="${esc(p.serial)}">${esc(p.name)}</button>`).join('') : '';
     const body = $('.pr-body', d);
@@ -360,32 +364,32 @@ function printerDialog() {
     : ['', 'python3 ~/Downloads/shelf_sync.py setup', 'python3 ~/Downloads/shelf_sync.py autostart on'];
   const box = document.createElement('div');
   box.className = 'dialog';
-  const steps = (os) => `
+  const steps = (os) => _t`
       <ol class="steps">
         <li>הורד את תוכנת הסנכרון: <button class="btn small primary" data-dlhelper>${I.download}shelf_sync.py</button></li>
         <li>פתח ${os === 'win' ? '<b>Command Prompt</b>' : '<b>Terminal</b>'} והרץ הגדרה ראשונית. היא תבקש את הנתיב של תיקיית המודלים, ואת דרך החיבור:${code(cmds(os)[1])}
           <div class="hint" style="margin:6px 0 0"><b>ענן Bambu</b> (מומלץ): מייל + קוד שנשלח למייל, מייבא את כל ההיסטוריה ומתעדכן. הסיסמה לא נשמרת.<br><b>רשת ביתית</b>: IP + Access Code מהמסך של המדפסת, בלי חשבון. רושם הדפסות כל עוד התוכנה רצה.<br><b>שניהם</b>: היסטוריה מהענן + האזנה ישירה למדפסת.</div></li>
         <li>הפעלה אוטומטית בכל כניסה למחשב:${code(cmds(os)[2])}</li>
       </ol>
-      <div class="hint">צריך רק Python 3.8 ומעלה, בלי חבילות נוספות${os === 'win' ? ' (python.org, לסמן "Add to PATH")' : ' (במק: אם אין, הפקודה תציע להתקין)'}. ההדפסות מופיעות כאן אוטומטית, לפי שם הקובץ.</div>`;
+      <div class="hint">צריך רק Python 3.8 ומעלה, בלי חבילות נוספות${os === 'win' ? _t(' (python.org, לסמן "Add to PATH")') : _t(' (במק: אם אין, הפקודה תציע להתקין)')}. ההדפסות מופיעות כאן אוטומטית, לפי שם הקובץ.</div>`;
   const code = (c) => `<div class="code"><code class="ltr">${esc(c)}</code><button class="btn small ghost" data-copy="${esc(c)}">${I.copy}</button></div>`;
-  box.innerHTML = `<div class="box wide">
+  box.innerHTML = _t`<div class="box wide">
     <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">חיבור למדפסת</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
-    ${d ? `<div class="pstatus">
-      <div class="prow"><span class="pdot ${st.kind === 'ok' ? 'run' : st.kind === 'login' ? 'bad' : 'off'}"></span><b>${st.kind === 'ok' ? 'הסנכרון פועל' : st.kind === 'login' ? 'צריך להתחבר מחדש לחשבון Bambu' : 'תוכנת הסנכרון לא פועלת כרגע'}</b></div>
+    ${d ? _t`<div class="pstatus">
+      <div class="prow"><span class="pdot ${st.kind === 'ok' ? 'run' : st.kind === 'login' ? 'bad' : 'off'}"></span><b>${st.kind === 'ok' ? _t('הסנכרון פועל') : st.kind === 'login' ? _t('צריך להתחבר מחדש לחשבון Bambu') : _t('תוכנת הסנכרון לא פועלת כרגע')}</b></div>
       <dl class="kv">
-        <dt>מצב</dt><dd>${{ cloud: 'ענן Bambu', lan: 'רשת ביתית', both: 'ענן + רשת ביתית' }[h.mode] || '–'}</dd>
+        <dt>מצב</dt><dd>${{ cloud: _t('ענן Bambu'), lan: _t('רשת ביתית'), both: _t('ענן + רשת ביתית') }[h.mode] || '–'}</dd>
         <dt>מחשב</dt><dd>${esc(h.host || '–')}</dd>
-        ${h.lastSync ? `<dt>סנכרון היסטוריה</dt><dd>${fmtAgo(h.lastSync)}</dd>` : ''}
+        ${h.lastSync ? _t`<dt>סנכרון היסטוריה</dt><dd>${fmtAgo(h.lastSync)}</dd>` : ''}
         <dt>עדכון אחרון</dt><dd>${fmtAgo(h.written)}</dd>
-        <dt>הדפסות שנקלטו</dt><dd>${count}${(S.unmatched || []).length ? ` · <a href="#" data-goinbox>${S.unmatched.length} לא משויכות</a>` : ''}</dd>
-        ${printers.map((p) => `<dt>${esc(p.name || 'מדפסת')}</dt><dd>${PSTATE[p.state] || p.state || '–'}${p.state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${p.job ? ` · ${esc(p.job)}` : ''} <span style="color:var(--ink3)">(${p.conn === 'lan' ? 'רשת ביתית' : p.conn === 'cloud' ? 'ענן' : esc(p.conn || '')})</span></dd>`).join('')}
+        <dt>הדפסות שנקלטו</dt><dd>${count}${(S.unmatched || []).length ? _t` · <a href="#" data-goinbox>${S.unmatched.length} לא משויכות</a>` : ''}</dd>
+        ${printers.map((p) => `<dt>${esc(p.name || _t('מדפסת'))}</dt><dd>${PSTATE[p.state] || p.state || '–'}${p.state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${p.job ? ` · ${esc(p.job)}` : ''} <span style="color:var(--ink3)">(${p.conn === 'lan' ? _t('רשת ביתית') : p.conn === 'cloud' ? _t('ענן') : esc(p.conn || '')})</span></dd>`).join('')}
       </dl>
       ${h.lastError ? `<div class="notice" style="margin-top:10px">${esc(h.lastError)}</div>` : ''}
-      ${st.kind === 'login' ? `<div class="hint">הרץ שוב את ההגדרה כדי להתחבר:${code(cmds(isWin ? 'win' : 'mac')[1])}</div>` : ''}
-      ${st.kind === 'stale' ? `<div class="hint">הפעל את התוכנה שוב (או את ההפעלה האוטומטית):${code(cmds(isWin ? 'win' : 'mac')[2])}</div>` : ''}
-    </div>` : `<p>PrintLog יכול לרשום הדפסות לבד: לייבא את כל היסטוריית ההדפסות מחשבון Bambu, ולרשום כל הדפסה חדשה שמסתיימת או נכשלת. בשביל זה צריך תוכנת עזר קטנה שרצה ברקע במחשב, כי דף בדפדפן לא יכול להתחבר למדפסת או לענן בעצמו.</p>`}
-    <details ${d ? '' : 'open'} class="setup"><summary>${d ? 'הוראות התקנה' : 'התקנה'}</summary>
+      ${st.kind === 'login' ? _t`<div class="hint">הרץ שוב את ההגדרה כדי להתחבר:${code(cmds(isWin ? 'win' : 'mac')[1])}</div>` : ''}
+      ${st.kind === 'stale' ? _t`<div class="hint">הפעל את התוכנה שוב (או את ההפעלה האוטומטית):${code(cmds(isWin ? 'win' : 'mac')[2])}</div>` : ''}
+    </div>` : _t`<p>PrintLog יכול לרשום הדפסות לבד: לייבא את כל היסטוריית ההדפסות מחשבון Bambu, ולרשום כל הדפסה חדשה שמסתיימת או נכשלת. בשביל זה צריך תוכנת עזר קטנה שרצה ברקע במחשב, כי דף בדפדפן לא יכול להתחבר למדפסת או לענן בעצמו.</p>`}
+    <details ${d ? '' : 'open'} class="setup"><summary>${d ? _t('הוראות התקנה') : _t('התקנה')}</summary>
       <div class="ostabs"><button class="btn small ${isWin ? '' : 'on'}" data-os="mac">Mac</button><button class="btn small ${isWin ? 'on' : ''}" data-os="win">Windows</button></div>
       <div id="steps">${steps(isWin ? 'win' : 'mac')}</div>
     </details>
@@ -401,7 +405,7 @@ function printerDialog() {
       return;
     }
     const c = t.closest('[data-copy]');
-    if (c) { navigator.clipboard?.writeText(c.dataset.copy).then(() => toast('הועתק')); return; }
+    if (c) { navigator.clipboard?.writeText(c.dataset.copy).then(() => toast(_t('הועתק'))); return; }
     const os = t.closest('[data-os]');
     if (os) { $$('[data-os]', box).forEach((b) => b.classList.toggle('on', b === os)); $('#steps', box).innerHTML = steps(os.dataset.os); return; }
     if (t.closest('[data-goinbox]')) { e.preventDefault(); box.remove(); S.view = 'inbox'; S.tag = null; S.folder = null; renderAll(); }
@@ -420,12 +424,12 @@ async function archiveModels(models) {
   const useDrive = S.gdrive && S.gdrive.connected;
   const files = models.flatMap((m) => m.versions.filter((v) => !isArchived(v.path) && !v.path.startsWith('@models/') && !M.rec(v.path).missing).map((v) => ({ m, v })));
   const size = files.reduce((a, { v }) => a + (M.rec(v.path).size || 0), 0);
-  const where = useDrive ? `לתיקייה <b>PrintLog Archive</b> ב-Google Drive (${esc(S.gdrive.email || '')})` : `לתיקייה <span class="mono">${esc(S.archiveDir)}</span>`;
-  const ok = await dialog('להעביר לארכיון?', `${files.length} קבצים (${fmtBytes(size)}) יועלו ${where} ויימחקו מהמחשב אחרי שההעלאה תיבדק.<br>ההיסטוריה, התגיות וההערות נשמרות, והכרטיסים ממשיכים להופיע עם ☁ ולהיפתח בתלת-ממד.`, [{ label: 'העבר', value: true, primary: true }, { label: 'ביטול', value: false }]);
+  const where = useDrive ? _t`לתיקייה <b>PrintLog Archive</b> ב-Google Drive (${esc(S.gdrive.email || '')})` : _t`לתיקייה <span class="mono">${esc(S.archiveDir)}</span>`;
+  const ok = await dialog(_t('להעביר לארכיון?'), _t`${files.length} קבצים (${fmtBytes(size)}) יועלו ${where} ויימחקו מהמחשב אחרי שההעלאה תיבדק.<br>ההיסטוריה, התגיות וההערות נשמרות, והכרטיסים ממשיכים להופיע עם ☁ ולהיפתח בתלת-ממד.`, [{ label: _t('העבר'), value: true, primary: true }, { label: _t('ביטול'), value: false }]);
   if (!ok) return;
   let done = 0, failed = 0, lastErr = '';
   for (const { m, v } of files) {
-    setProgress(`${useDrive ? 'מעלה ל-Google Drive' : 'מעביר לארכיון'} ${done + failed + 1}/${files.length}`, (done + failed) / files.length);
+    setProgress(`${useDrive ? _t('מעלה ל-Google Drive') : _t('מעביר לארכיון')} ${done + failed + 1}/${files.length}`, (done + failed) / files.length);
     try {
       const old = v.path;
       let np, meta = {};
@@ -439,13 +443,13 @@ async function archiveModels(models) {
       v.path = np;
       done++;
       lib.save();
-    } catch (e) { failed++; lastErr = cleanErr(e); console.warn(e); if (/הרשאה/.test(lastErr)) break; }
+    } catch (e) { failed++; lastErr = cleanErr(e); console.warn(e); if (/הרשאה|permission/i.test(lastErr)) break; }
   }
   if (useDrive) { try { S.gdrive = await native.gdrive.status(); } catch { } renderToolbar(); }
   setProgress(null);
   lib.save(true);
-  if (failed && /הרשאה/.test(lastErr)) toast(lastErr, true); else
-  toast(failed ? `${done} קבצים הועברו, ${failed} נכשלו: ${lastErr}` : `${done} קבצים הועברו לארכיון ופינו ${fmtBytes(size)}`, !!failed);
+  if (failed && /הרשאה|permission/i.test(lastErr)) toast(lastErr, true); else
+  toast(failed ? _t`${done} קבצים הועברו, ${failed} נכשלו: ${lastErr}` : _t`${done} קבצים הועברו לארכיון ופינו ${fmtBytes(size)}`, !!failed);
   if (S.open) closeModal();
   await rescan(false);
 }
@@ -453,7 +457,7 @@ async function restoreModel(m) {
   const vs = m.versions.filter((v) => v.path.startsWith('@gdrive/'));
   let done = 0;
   for (const v of vs) {
-    setProgress(`מוריד מ-Google Drive ${done + 1}/${vs.length}`, done / vs.length);
+    setProgress(_t`מוריד מ-Google Drive ${done + 1}/${vs.length}`, done / vs.length);
     try {
       const rec = lib.data.files[v.path] || {};
       const r = await native.gdrive.restore(v.path, rec.origPath || baseName(v.path));
@@ -463,11 +467,11 @@ async function restoreModel(m) {
       if (m.current === v.path) m.current = r.path;
       v.path = r.path;
       done++;
-    } catch (e) { toast('ההחזרה נכשלה: ' + e.message, true); }
+    } catch (e) { toast(_t('ההחזרה נכשלה: ') + e.message, true); }
   }
   setProgress(null);
   lib.save(true);
-  if (done) toast(`${done} קבצים הוחזרו לתיקייה`);
+  if (done) toast(_t`${done} קבצים הוחזרו לתיקייה`);
   if (S.open) closeModal();
   await rescan(false);
 }
@@ -476,20 +480,20 @@ async function restoreModel(m) {
 async function installUpdate(r) {
   if (S.updating) return;
   S.updating = true;
-  if (native.onUpdateProgress && !S.updHook) { S.updHook = 1; native.onUpdateProgress((p) => setProgress(`מוריד את גרסה ${r.latest}…`, p)); }
-  setProgress(`מוריד את גרסה ${r.latest}…`, 0);
+  if (native.onUpdateProgress && !S.updHook) { S.updHook = 1; native.onUpdateProgress((p) => setProgress(_t`מוריד את גרסה ${r.latest}…`, p)); }
+  setProgress(_t`מוריד את גרסה ${r.latest}…`, 0);
   const res = await native.installUpdate(r.installUrl);
-  if (res.ok) { setProgress('מתקין ומפעיל מחדש…', 1); lib.save(true); return; }
+  if (res.ok) { setProgress(_t('מתקין ומפעיל מחדש…'), 1); lib.save(true); return; }
   S.updating = false;
   setProgress(null);
-  toast('העדכון האוטומטי נכשל: ' + res.error + '. פותח את דף ההורדה.', true);
+  toast(_t('העדכון האוטומטי נכשל: ') + res.error + _t('. פותח את דף ההורדה.'), true);
   native.openUrl(r.url);
 }
 function markSettingsUpdate() {
   const b = $('#settings');
   if (!b) return;
   b.classList.toggle('has-update', !!S.updateAvail);
-  b.title = S.updateAvail ? `הגדרות · גרסה ${S.updateAvail.latest} זמינה` : 'הגדרות';
+  b.title = S.updateAvail ? _t`הגדרות · גרסה ${S.updateAvail.latest} זמינה` : _t('הגדרות');
 }
 async function checkUpdate(manual) {
   if (!native || !native.checkUpdate) return;
@@ -502,12 +506,12 @@ async function checkUpdate(manual) {
     S.updateShown = r.latest;
     const t = document.createElement('div');
     t.className = 'toast';
-    t.innerHTML = `גרסה חדשה זמינה: ${esc(r.latest)} (יש לך ${esc(r.current)}) <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">${r.canInstall ? 'עדכן עכשיו' : 'הורד'}</button><div style="font-size:12px;opacity:.75;margin-top:4px">${r.canInstall ? 'האפליקציה תוריד את הגרסה, תיסגר ותיפתח מחדש. ' : ''}ההגדרות, החיבור ל-Bambu והספרייה נשמרים.</div>`;
+    t.innerHTML = _t`גרסה חדשה זמינה: ${esc(r.latest)} (יש לך ${esc(r.current)}) <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">${r.canInstall ? _t('עדכן עכשיו') : _t('הורד')}</button><div style="font-size:12px;opacity:.75;margin-top:4px">${r.canInstall ? _t('האפליקציה תוריד את הגרסה, תיסגר ותיפתח מחדש. ') : ''}ההגדרות, החיבור ל-Bambu והספרייה נשמרים.</div>`;
     $('button', t).onclick = () => { t.remove(); if (r.canInstall) installUpdate(r); else native.openUrl(r.url); };
     $('#toasts').appendChild(t);
     if (!manual) setTimeout(() => t.remove(), 30000);
   } else if (manual) {
-    toast(r.error === 'private' ? 'עדיין לא פורסמו גרסאות ציבוריות' : r.error ? 'בדיקת העדכונים נכשלה' : `יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
+    toast(r.error === 'private' ? _t('עדיין לא פורסמו גרסאות ציבוריות') : r.error ? _t('בדיקת העדכונים נכשלה') : _t`יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
   }
 }
 
@@ -525,38 +529,39 @@ async function nativeSettings() {
   const draw = () => {
     const usesCloud = st.mode === 'cloud' || st.mode === 'both';
     const usesLan = st.mode === 'lan' || st.mode === 'both';
-    box.innerHTML = `<div class="box wide settings">
+    box.innerHTML = _t`<div class="box wide settings">
     <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">הגדרות וחיבור למדפסת</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
-    ${d && st.mode !== 'off' ? `<div class="pstatus"><div class="prow"><span class="pdot ${hs.kind === 'ok' ? 'run' : hs.kind === 'login' ? 'bad' : 'off'}"></span><b>${hs.kind === 'ok' ? 'הסנכרון פועל' : hs.kind === 'login' ? 'צריך להתחבר מחדש לחשבון Bambu' : 'הסנכרון לא פעיל'}</b><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px">${h.lastSync ? 'היסטוריה סונכרנה ' + fmtAgo(h.lastSync) : ''}</span></div>
-      <dl class="kv"><dt>הדפסות שנקלטו</dt><dd>${(d.prints || []).length}${(S.unmatched || []).length ? ` · <a href="#" data-goinbox>${S.unmatched.length} לא משויכות</a>` : ''}</dd>
-      ${Object.values(d.printers || {}).map((p) => `<dt>${esc(p.name || 'מדפסת')}</dt><dd>${PSTATE[p.state] || p.state || '–'}${p.state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${p.job ? ` · ${esc(p.job)}` : ''} <span style="color:var(--ink3)">(${p.conn === 'lan' ? 'רשת ביתית' : p.conn === 'cloud' ? 'ענן' : esc(p.conn || '')})</span></dd>`).join('')}</dl>
+    ${d && st.mode !== 'off' ? _t`<div class="pstatus"><div class="prow"><span class="pdot ${hs.kind === 'ok' ? 'run' : hs.kind === 'login' ? 'bad' : 'off'}"></span><b>${hs.kind === 'ok' ? _t('הסנכרון פועל') : hs.kind === 'login' ? _t('צריך להתחבר מחדש לחשבון Bambu') : _t('הסנכרון לא פעיל')}</b><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px">${h.lastSync ? _t('היסטוריה סונכרנה ') + fmtAgo(h.lastSync) : ''}</span></div>
+      <dl class="kv"><dt>הדפסות שנקלטו</dt><dd>${(d.prints || []).length}${(S.unmatched || []).length ? _t` · <a href="#" data-goinbox>${S.unmatched.length} לא משויכות</a>` : ''}</dd>
+      ${Object.values(d.printers || {}).map((p) => `<dt>${esc(p.name || _t('מדפסת'))}</dt><dd>${PSTATE[p.state] || p.state || '–'}${p.state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${p.job ? ` · ${esc(p.job)}` : ''} <span style="color:var(--ink3)">(${p.conn === 'lan' ? _t('רשת ביתית') : p.conn === 'cloud' ? _t('ענן') : esc(p.conn || '')})</span></dd>`).join('')}</dl>
       ${h.lastError ? `<div class="notice" style="margin-top:10px">${esc(h.lastError)}</div>` : ''}</div>` : ''}
 
     <div class="section-title">איך להתחבר למדפסת</div>
-    <div class="seg modes">${[['cloud', 'ענן Bambu'], ['lan', 'רשת ביתית'], ['both', 'שניהם'], ['off', 'כבוי']].map(([k, l]) => `<button data-mode="${k}" class="${st.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-    <div class="hint">${{ cloud: 'מייבא את כל היסטוריית ההדפסות מחשבון Bambu, ומתעדכן בזמן אמת דרך הענן. מומלץ.', lan: 'מתחבר ישירות למדפסת ברשת הביתית, בלי חשבון. רושם הדפסות כל עוד האפליקציה פועלת.', both: 'היסטוריה מהענן, ובנוסף חיבור ישיר למדפסת ברשת הביתית.', off: 'בלי חיבור. אפשר לרשום הדפסות ידנית.' }[st.mode]}</div>
+    <div class="seg modes">${[['cloud', _t('ענן Bambu')], ['lan', _t('רשת ביתית')], ['both', _t('שניהם')], ['off', _t('כבוי')]].map(([k, l]) => `<button data-mode="${k}" class="${st.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="hint">${{ cloud: _t('מייבא את כל היסטוריית ההדפסות מחשבון Bambu, ומתעדכן בזמן אמת דרך הענן. מומלץ.'), lan: _t('מתחבר ישירות למדפסת ברשת הביתית, בלי חשבון. רושם הדפסות כל עוד האפליקציה פועלת.'), both: _t('היסטוריה מהענן, ובנוסף חיבור ישיר למדפסת ברשת הביתית.'), off: _t('בלי חיבור. אפשר לרשום הדפסות ידנית.') }[st.mode]}</div>
 
-    ${usesCloud ? `<div class="section-title">חשבון Bambu</div>
-      ${st.cloud && st.cloud.loggedIn ? `<div class="acct"><span>מחובר בתור <b class="ltr">${esc(st.cloud.email)}</b></span><button class="btn small" data-syncnow>${I.refresh}סנכרן עכשיו</button><button class="btn small ghost danger" data-logout>התנתק</button></div>`
-      : login.step === 'form' ? `<div class="form-grid">
+    ${usesCloud ? _t`<div class="section-title">חשבון Bambu</div>
+      ${st.cloud && st.cloud.loggedIn ? _t`<div class="acct"><span>מחובר בתור <b class="ltr">${esc(st.cloud.email)}</b></span><button class="btn small" data-syncnow>${I.refresh}סנכרן עכשיו</button><button class="btn small ghost danger" data-logout>התנתק</button></div>`
+      : login.step === 'form' ? _t`<div class="form-grid">
           <div class="full"><label>מייל (או טלפון)</label><input class="inp ltr" id="lemail" value="${esc((st.cloud && st.cloud.email) || '')}" autocomplete="username"></div>
           <div class="full"><label>סיסמה (לא נשמרת)</label><input class="inp ltr" id="lpass" type="password" autocomplete="current-password"></div>
           <div><label>אזור</label><select class="inp" id="lregion"><option value="global">בינלאומי (bambulab.com)</option><option value="china" ${(st.cloud && st.cloud.region) === 'china' ? 'selected' : ''}>סין (bambulab.cn)</option></select></div>
           <div style="align-self:end"><button class="btn primary" data-login>התחבר</button></div>
           <div class="full hint" style="margin-top:2px">נרשמת ל-Bambu עם Google, Apple או Facebook ואין לך סיסמה? מלא רק מייל ו<button class="btn small" data-logincode>שלח לי קוד למייל</button></div></div>`
-      : `<div class="form-grid"><div class="full"><label>${login.step === 'code' ? 'קוד שנשלח למייל' : 'קוד מאפליקציית האימות'}</label><input class="inp ltr" id="lcode" inputmode="numeric" autocomplete="one-time-code"></div>
+      : _t`<div class="form-grid"><div class="full"><label>${login.step === 'code' ? _t('קוד שנשלח למייל') : _t('קוד מאפליקציית האימות')}</label><input class="inp ltr" id="lcode" inputmode="numeric" autocomplete="one-time-code"></div>
           <div><button class="btn primary" data-verify>אמת</button> <button class="btn ghost" data-back>חזרה</button></div></div>`}
       ${login.msg ? `<div class="notice" style="margin-top:8px">${esc(login.msg)}</div>` : ''}` : ''}
 
-    ${st.mode !== 'off' ? `<div class="section-title">מדפסות</div>
-      ${printers.length ? printers.map((p, i) => `<div class="printer-row">
-        <div class="pr-head">${I.printer}<b>${esc(p.name || p.serial)}</b><span class="mono" style="color:var(--ink3)">${esc(p.model || '')} · ${esc(p.serial)}</span>${native.sync.printer && S.sync && (S.sync.printers || {})[p.serial] ? `<button class="btn small" data-openps="${esc(p.serial)}" style="margin-inline-start:auto">מסך המדפסת</button>` : ''}<button class="btn small ghost danger" data-rmp="${i}" style="${native.sync.printer && S.sync && (S.sync.printers || {})[p.serial] ? '' : 'margin-inline-start:auto'}">הסר</button></div>
+    ${st.mode !== 'off' ? _t`<div class="section-title">מדפסות</div>
+      ${printers.length ? printers.map((p, i) => _t`<div class="printer-row">
+        <div class="pr-head">${I.printer}<b>${esc(p.name || p.serial)}</b><span class="mono" style="color:var(--ink3)">${esc(p.model || '')} · ${esc(p.serial)}</span>${native.sync.printer && S.sync && (S.sync.printers || {})[p.serial] ? _t`<button class="btn small" data-openps="${esc(p.serial)}" style="margin-inline-start:auto">מסך המדפסת</button>` : ''}<button class="btn small ghost danger" data-rmp="${i}" style="${native.sync.printer && S.sync && (S.sync.printers || {})[p.serial] ? '' : 'margin-inline-start:auto'}">הסר</button></div>
         ${usesLan ? `<div class="form-grid"><div><label>IP</label><input class="inp ltr" data-pf="ip" data-i="${i}" value="${esc(p.ip || '')}" placeholder="192.168.1.50"></div><div><label>Access Code</label><input class="inp ltr" data-pf="access_code" data-i="${i}" value="${esc(p.access_code || '')}"></div></div>` : ''}
-      </div>`).join('') : `<div class="hint">${usesCloud ? 'אחרי ההתחברות המדפסות מהחשבון יופיעו כאן.' : 'עוד אין מדפסות.'}</div>`}
-      ${usesLan ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-discover>${I.search}חפש מדפסות ברשת</button><button class="btn small ghost" data-addp>${I.plus}הוסף ידנית</button></div>
+      </div>`).join('') : `<div class="hint">${usesCloud ? _t('אחרי ההתחברות המדפסות מהחשבון יופיעו כאן.') : _t('עוד אין מדפסות.')}</div>`}
+      ${usesLan ? _t`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-discover>${I.search}חפש מדפסות ברשת</button><button class="btn small ghost" data-addp>${I.plus}הוסף ידנית</button></div>
         <div class="hint">את ה-IP וה-Access Code מוצאים במסך המדפסת: הגדרות ← רשת (WLAN / LAN).</div>` : ''}` : ''}
 
     <div class="section-title">כללי</div>
+    ${LANG_ROW()}
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <div class="alert-opts">
       <label class="chk"><input type="checkbox" id="oapause" ${st.options.alertPause !== false ? 'checked' : ''}> התראה כשהדפסה נעצרת או יש תקלה (עם קוד התקלה)</label>
@@ -564,23 +569,23 @@ async function nativeSettings() {
       <label class="chk"><input type="checkbox" id="oaten" ${st.options.alertTenMin !== false ? 'checked' : ''}> התראה 10 דקות לפני סוף ההדפסה</label>
       <label class="chk"><input type="checkbox" id="oaams" ${st.options.alertAms !== false ? 'checked' : ''}> התראה כשפילמנט ב-AMS עומד להיגמר או כשהלחות גבוהה</label>
     </div>
-    ${!S.internalLib ? `<label class="chk"><input type="checkbox" id="oautomatch" ${st.options.autoMatch !== false ? 'checked' : ''}> לחפש בתיקייה קובץ שמתאים לכל הדפסה (לפי השם), ולהציג אותו במקום להוריד מ-Bambu</label>` : ''}
-    ${usesLan ? `<label class="chk"><input type="checkbox" id="otimelapse" ${st.options.timelapse !== false ? 'checked' : ''}> לייבא טיימלפס מהמדפסת לכל הדפסה (רק כשהמדפסת זמינה ברשת הביתית)</label>
+    ${!S.internalLib ? _t`<label class="chk"><input type="checkbox" id="oautomatch" ${st.options.autoMatch !== false ? 'checked' : ''}> לחפש בתיקייה קובץ שמתאים לכל הדפסה (לפי השם), ולהציג אותו במקום להוריד מ-Bambu</label>` : ''}
+    ${usesLan ? _t`<label class="chk"><input type="checkbox" id="otimelapse" ${st.options.timelapse !== false ? 'checked' : ''}> לייבא טיימלפס מהמדפסת לכל הדפסה (רק כשהמדפסת זמינה ברשת הביתית)</label>
     <label class="chk" style="margin-inline-start:22px"><input type="checkbox" id="otldelete" ${st.options.timelapseDelete ? 'checked' : ''}> אחרי הייבוא, למחוק את הטיימלפס מהמדפסת כדי לפנות מקום</label>` : ''}
-    ${usesCloud ? `<label class="chk"><input type="checkbox" id="oautomodels" ${st.options.autoModels !== false ? 'checked' : ''}> להוריד ברקע מ-Bambu את המודלים של ההדפסות, לתצוגה בתלת-ממד <span class="hint" data-msize style="display:inline"></span></label>` : ''}
+    ${usesCloud ? _t`<label class="chk"><input type="checkbox" id="oautomodels" ${st.options.autoModels !== false ? 'checked' : ''}> להוריד ברקע מ-Bambu את המודלים של ההדפסות, לתצוגה בתלת-ממד <span class="hint" data-msize style="display:inline"></span></label>` : ''}
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
     <div class="section-title">ארכיון ב-Google Drive</div>
-    ${!gd || !gd.available ? `<div class="hint">בגרסה הזו לא מוגדר מפתח Google, ולכן הארכיון לא זמין.</div>`
-      : gd.connected ? `<div class="acct"><span>מחובר בתור <b class="ltr">${esc(gd.email || '')}</b> · הקבצים נשמרים בתיקייה <b>PrintLog Archive</b></span><button class="btn small" data-gdnow>☁ העלה עכשיו (${toArchive().length})</button><button class="btn small ghost danger" data-gdout>התנתק</button></div>`
-      : `<div class="acct"><span>לא מחובר</span><button class="btn small primary" data-gdin>התחבר ל-Google Drive</button></div>`}
+    ${!gd || !gd.available ? _t`<div class="hint">בגרסה הזו לא מוגדר מפתח Google, ולכן הארכיון לא זמין.</div>`
+      : gd.connected ? _t`<div class="acct"><span>מחובר בתור <b class="ltr">${esc(gd.email || '')}</b> · הקבצים נשמרים בתיקייה <b>PrintLog Archive</b></span><button class="btn small" data-gdnow>☁ העלה עכשיו (${toArchive().length})</button><button class="btn small ghost danger" data-gdout>התנתק</button></div>`
+      : _t`<div class="acct"><span>לא מחובר</span><button class="btn small primary" data-gdin>התחבר ל-Google Drive</button></div>`}
     <div class="hint">קבצים שהצליחו אפשר להעלות ל-Drive ולמחוק מהמחשב (בטאב „הדפסות שהצליחו”, או מתוך קובץ). הם ממשיכים להופיע עם ☁ ונפתחים כרגיל. בחלון של Google חשוב לסמן את התיבה של Google Drive. PrintLog רואה ב-Drive רק את הקבצים שהוא עצמו העלה, ולא נוגע בהגדרות של Google Drive במחשב.</div>
-    ${st.archiveDir ? `<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
-    <div class="acct" style="margin-top:10px">${st.libraryInternal ? `<span>תצוגת ענן בלבד, בלי תיקייה משלך</span><button class="btn small" data-changelib>בחר תיקיית מודלים</button>` : `<span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button>`}</div>
-    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span>${S.updateAvail ? `<button class="btn small upd-btn" data-doupd>עדכן לגרסה ${esc(S.updateAvail.latest)}</button>` : `<button class="btn small ghost" data-checkupd>בדוק עדכונים</button>`}</div>
-    ${native.wipe ? `<div class="hint" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">רוצה להסיר את PrintLog לגמרי? <button class="btn small ghost danger" data-wipe>מחק את כל הנתונים של PrintLog</button></div>` : ''}
+    ${st.archiveDir ? _t`<div class="acct" style="margin-top:6px"><span>תיקיית ארכיון מקומית: <b class="ltr mono">${esc(st.archiveDir)}</b></span><button class="btn small ghost" data-cleararchive>הסר</button></div>` : ''}
+    <div class="acct" style="margin-top:10px">${st.libraryInternal ? _t`<span>תצוגת ענן בלבד, בלי תיקייה משלך</span><button class="btn small" data-changelib>בחר תיקיית מודלים</button>` : _t`<span>תיקיית המודלים: <b class="ltr mono">${esc(st.library || '')}</b></span><button class="btn small" data-changelib>החלף תיקייה</button>`}</div>
+    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save>שמור</button><button class="btn" data-close>סגור</button><span style="margin-inline-start:auto;color:var(--ink3);font-size:12px;align-self:center">גרסה ${esc(st.version || '')}</span>${S.updateAvail ? _t`<button class="btn small upd-btn" data-doupd>עדכן לגרסה ${esc(S.updateAvail.latest)}</button>` : _t`<button class="btn small ghost" data-checkupd>בדוק עדכונים</button>`}</div>
+    ${native.wipe ? _t`<div class="hint" style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">רוצה להסיר את PrintLog לגמרי? <button class="btn small ghost danger" data-wipe>מחק את כל הנתונים של PrintLog</button></div>` : ''}
   </div>`;
-    if (native.sync.modelsSize) native.sync.modelsSize().then((b) => { const e = $('[data-msize]', box); if (e && b) e.textContent = `(${fmtBytes(b)} שמורים)`; }).catch(() => {});
+    if (native.sync.modelsSize) native.sync.modelsSize().then((b) => { const e = $('[data-msize]', box); if (e && b) e.textContent = _t`(${fmtBytes(b)} שמורים)`; }).catch(() => {});
   };
   const collect = () => {
     for (const inp of $$('[data-pf]', box)) printers[+inp.dataset.i][inp.dataset.pf] = inp.value.trim();
@@ -591,7 +596,10 @@ async function nativeSettings() {
     if ($('#oautomodels', box)) { S.autoModels = $('#oautomodels', box).checked; schedulePrefetch(); }
     if ($('#oautomatch', box) && S.autoMatch !== $('#oautomatch', box).checked) { S.autoMatch = $('#oautomatch', box).checked; syncPrints(true); }
     printers = (st.printers || []).map((p) => ({ ...p }));
-    if (!quiet) toast('ההגדרות נשמרו');
+    // a new language: reload so every screen is drawn in it
+    const lang = $('#olang', box) && $('#olang', box).value;
+    if (lang && lang !== getLang()) { await native.sync.setConfig({ options: { lang } }); location.reload(); return; }
+    if (!quiet) toast(_t('ההגדרות נשמרו'));
   };
   box.addEventListener('click', async (e) => {
     const t = e.target;
@@ -602,39 +610,39 @@ async function nativeSettings() {
     if (t.closest('[data-login]') || t.closest('[data-logincode]')) {
       collect();
       const codeOnly = !!t.closest('[data-logincode]');
-      const b = t.closest('[data-login],[data-logincode]'); b.disabled = true; b.textContent = codeOnly ? 'שולח…' : 'מתחבר…';
+      const b = t.closest('[data-login],[data-logincode]'); b.disabled = true; b.textContent = codeOnly ? _t('שולח…') : _t('מתחבר…');
       const r = await native.sync.login({ email: $('#lemail', box).value.trim(), password: codeOnly ? '' : $('#lpass', box).value, region: $('#lregion', box).value, codeOnly });
-      login = r.ok ? { step: 'form', msg: '' } : r.need ? { step: r.need, msg: r.need === 'code' ? 'שלחנו קוד למייל שלך' : '' } : { step: 'form', msg: r.error || 'ההתחברות נכשלה' };
-      if (login.msg === 'שלחנו קוד למייל שלך') { toast(login.msg); login.msg = ''; }
-      if (r.ok) { await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…'); }
+      login = r.ok ? { step: 'form', msg: '' } : r.need ? { step: r.need, msg: r.need === 'code' ? _t('שלחנו קוד למייל שלך') : '' } : { step: 'form', msg: r.error || _t('ההתחברות נכשלה') };
+      if (login.msg === _t('שלחנו קוד למייל שלך')) { toast(login.msg); login.msg = ''; }
+      if (r.ok) { await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…')); }
       draw();
       return;
     }
     if (t.closest('[data-verify]')) {
       const r = await native.sync.verify({ step: login.step, code: $('#lcode', box).value.trim() });
-      if (r.ok) { login = { step: 'form', msg: '' }; await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…'); }
-      else login.msg = r.error || 'הקוד לא התקבל';
+      if (r.ok) { login = { step: 'form', msg: '' }; await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…')); }
+      else login.msg = r.error || _t('הקוד לא התקבל');
       draw();
       return;
     }
     if (t.closest('[data-back]')) { login = { step: 'form', msg: '' }; draw(); return; }
     if (t.closest('[data-logout]')) { st = await native.sync.logout(); draw(); return; }
-    if (t.closest('[data-syncnow]')) { native.sync.syncNow(); toast('מסנכרן…'); return; }
+    if (t.closest('[data-syncnow]')) { native.sync.syncNow(); toast(_t('מסנכרן…')); return; }
     if (t.closest('[data-discover]')) {
       collect();
-      const b = t.closest('[data-discover]'); b.disabled = true; b.textContent = 'מחפש ברשת…';
+      const b = t.closest('[data-discover]'); b.disabled = true; b.textContent = _t('מחפש ברשת…');
       const found = await native.sync.discover();
       for (const f of found) {
         const ex = printers.find((p) => p.serial === f.serial);
         if (ex) ex.ip = f.ip; else printers.push({ serial: f.serial, name: f.name, model: f.model, ip: f.ip, access_code: '' });
       }
-      toast(found.length ? `נמצאו ${found.length} מדפסות` : 'לא נמצאה מדפסת ברשת. בדוק שהמחשב והמדפסת באותה רשת, או הכנס ידנית את ה-IP מהמסך של המדפסת (הגדרות → רשת).', !found.length);
+      toast(found.length ? _t`נמצאו ${found.length} מדפסות` : _t('לא נמצאה מדפסת ברשת. בדוק שהמחשב והמדפסת באותה רשת, או הכנס ידנית את ה-IP מהמסך של המדפסת (הגדרות → רשת).'), !found.length);
       draw();
       return;
     }
     if (t.closest('[data-addp]')) {
       collect();
-      const serial = await askText('הוספת מדפסת', 'מספר סידורי (במסך המדפסת: הגדרות ← Device)');
+      const serial = await askText(_t('הוספת מדפסת'), _t('מספר סידורי (במסך המדפסת: הגדרות ← Device)'));
       if (serial) printers.push({ serial: serial.trim(), name: serial.trim(), ip: '', access_code: '' });
       draw();
       return;
@@ -644,22 +652,22 @@ async function nativeSettings() {
     const rm = t.closest('[data-rmp]');
     if (rm) { collect(); printers.splice(+rm.dataset.rmp, 1); draw(); return; }
     if (t.closest('[data-gdin]')) {
-      const b = t.closest('[data-gdin]'); b.disabled = true; b.textContent = 'ממתין לאישור בדפדפן…';
+      const b = t.closest('[data-gdin]'); b.disabled = true; b.textContent = _t('ממתין לאישור בדפדפן…');
       const r = await native.gdrive.connect();
-      if (r.ok) toast('מחובר ל-Google Drive'); else toast('ההתחברות ל-Google Drive נכשלה: ' + r.error, true);
+      if (r.ok) toast(_t('מחובר ל-Google Drive')); else toast(_t('ההתחברות ל-Google Drive נכשלה: ') + r.error, true);
       gd = S.gdrive = await native.gdrive.status();
       draw(); renderToolbar();
       return;
     }
     if (t.closest('[data-gdnow]')) {
-      if (!toArchive().length) { toast('אין קבצים להעלות: כל הקבצים של הדפסות שהצליחו כבר בארכיון'); return; }
+      if (!toArchive().length) { toast(_t('אין קבצים להעלות: כל הקבצים של הדפסות שהצליחו כבר בארכיון')); return; }
       box.remove(); archiveModels(toArchive()); return;
     }
     if (t.closest('[data-gdout]')) { await native.gdrive.disconnect(); gd = S.gdrive = await native.gdrive.status(); draw(); renderToolbar(); return; }
     if (t.closest('[data-pickarchive]')) {
       const r = await native.archive.pick();
       if (r && r.error) toast(r.error, true);
-      else if (r) { S.archiveDir = r.path; lib.archive = new NativeDirHandle('@archive', 'ארכיון'); st = await native.sync.getState(); draw(); rescan(false); toast('תיקיית הארכיון נשמרה'); }
+      else if (r) { S.archiveDir = r.path; lib.archive = new NativeDirHandle('@archive', _t('ארכיון')); st = await native.sync.getState(); draw(); rescan(false); toast(_t('תיקיית הארכיון נשמרה')); }
       return;
     }
     if (t.closest('[data-cleararchive]')) { await native.archive.clear(); S.archiveDir = ''; lib.archive = null; st = await native.sync.getState(); draw(); rescan(false); return; }
@@ -675,7 +683,7 @@ async function nativeSettings() {
       let withLib = false;
       const onChg = (ev) => { if (ev.target && ev.target.id === 'wipelib') withLib = ev.target.checked; };
       document.addEventListener('change', onChg);
-      const r = await dialog('למחוק את כל הנתונים של PrintLog?', `יימחקו: החיבור ל-Bambu ול-Google Drive, המדפסות, ההעדפות והמטמון${st.libraryInternal ? ', וגם ההערות, התגיות והמודלים שהורדו (במצב תצוגת ענן הם שמורים אצל האפליקציה)' : ''}. האפליקציה תיסגר, ואחר כך אפשר למחוק אותה.<br><br>${own ? `<label class="chk"><input type="checkbox" id="wipelib"> גם למחוק את נתוני PrintLog מתיקיית המודלים (<span class="mono">.shelf</span>: הערות, תגיות, יומן הדפסות ומודלים שהורדו). קבצי ה-STL / 3MF עצמם לא יימחקו.</label><br>` : ''}הקבצים בתיקיית המודלים וב-Google Drive לא נמחקים.`, [{ label: 'מחק הכול', value: 'yes', primary: true }, { label: 'ביטול', value: false }]);
+      const r = await dialog(_t('למחוק את כל הנתונים של PrintLog?'), _t`יימחקו: החיבור ל-Bambu ול-Google Drive, המדפסות, ההעדפות והמטמון${st.libraryInternal ? _t(', וגם ההערות, התגיות והמודלים שהורדו (במצב תצוגת ענן הם שמורים אצל האפליקציה)') : ''}. האפליקציה תיסגר, ואחר כך אפשר למחוק אותה.<br><br>${own ? _t`<label class="chk"><input type="checkbox" id="wipelib"> גם למחוק את נתוני PrintLog מתיקיית המודלים (<span class="mono">.shelf</span>: הערות, תגיות, יומן הדפסות ומודלים שהורדו). קבצי ה-STL / 3MF עצמם לא יימחקו.</label><br>` : ''}הקבצים בתיקיית המודלים וב-Google Drive לא נמחקים.`, [{ label: _t('מחק הכול'), value: 'yes', primary: true }, { label: _t('ביטול'), value: false }]);
       document.removeEventListener('change', onChg);
       if (r !== 'yes') return;
       await native.wipe({ withLibraryData: withLib });
@@ -691,14 +699,14 @@ async function nativeSettings() {
 function renderInbox() {
   const list = [...(S.unmatched || [])].sort((a, b) => (b.start || '').localeCompare(a.start || ''));
   const g = $('#grid');
-  if (!list.length) { g.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>הכל משויך</b>כל ההדפסות מהמדפסת נרשמו על מודלים.</div>`; return; }
-  g.innerHTML = `<div class="inbox" style="grid-column:1/-1">
+  if (!list.length) { g.innerHTML = _t`<div class="empty" style="grid-column:1/-1"><b>הכל משויך</b>כל ההדפסות מהמדפסת נרשמו על מודלים.</div>`; return; }
+  g.innerHTML = _t`<div class="inbox" style="grid-column:1/-1">
     <div class="inbox-head"><div class="hint" style="margin:0;flex:1">ההדפסות האלה הגיעו מהמדפסת, אבל לא מצאתי מודל עם שם מתאים. אחרי ששייכים הדפסה למודל, השם נשמר והדפסות עתידיות באותו שם ישויכו אוטומטית.</div><button class="btn small ghost" data-ignoreall>התעלם מכולן</button></div>
-    ${list.map((e) => `<div class="irow">
+    ${list.map((e) => _t`<div class="irow">
       ${e.cover ? `<img class="icover" src="${esc(e.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'icover'}))">` : '<div class="icover"></div>'}
-      <div class="ii"><div class="it">${esc(e.title || e.design || 'ללא שם')}</div>
-        <div class="isub">${[e.design && e.design !== e.title ? esc(e.design) : '', esc(e.printer || ''), fmtDate(e.start), e.minutes ? fmtDur(e.minutes * 60) : '', e.grams ? e.grams + ' g' : '', e.source === 'cloud' ? 'מהענן' : 'מהמדפסת'].filter(Boolean).join(' · ')}</div></div>
-      <span class="pill ${e.result === 'ok' ? 'ok' : e.result === 'unknown' ? 'partial' : 'fail'}">${e.result === 'cancel' ? 'בוטלה' : e.result === 'ok' ? 'הצליחה' : e.result === 'unknown' ? 'לא ידוע' : 'נכשלה'}</span>
+      <div class="ii"><div class="it">${esc(e.title || e.design || _t('ללא שם'))}</div>
+        <div class="isub">${[e.design && e.design !== e.title ? esc(e.design) : '', esc(e.printer || ''), fmtDate(e.start), e.minutes ? fmtDur(e.minutes * 60) : '', e.grams ? e.grams + ' g' : '', e.source === 'cloud' ? _t('מהענן') : _t('מהמדפסת')].filter(Boolean).join(' · ')}</div></div>
+      <span class="pill ${e.result === 'ok' ? 'ok' : e.result === 'unknown' ? 'partial' : 'fail'}">${e.result === 'cancel' ? _t('בוטלה') : e.result === 'ok' ? _t('הצליחה') : e.result === 'unknown' ? _t('לא ידוע') : _t('נכשלה')}</span>
       <button class="btn small" data-assign="${esc(e.key)}">שייך למודל…</button>
       <button class="btn small ghost" data-ignore="${esc(e.key)}">התעלם</button>
     </div>`).join('')}</div>`;
@@ -708,7 +716,7 @@ async function onInboxClick(e) {
   const D = lib.data;
   D.imported = D.imported || {};
   if (t.closest('[data-ignoreall]')) {
-    const ok = await dialog('להתעלם מכל ההדפסות הלא משויכות?', 'הן לא יופיעו כאן שוב. אפשר עדיין לרשום הדפסות ידנית.', [{ label: 'התעלם מכולן', value: true, danger: true }, { label: 'ביטול', value: false }]);
+    const ok = await dialog(_t('להתעלם מכל ההדפסות הלא משויכות?'), _t('הן לא יופיעו כאן שוב. אפשר עדיין לרשום הדפסות ידנית.'), [{ label: _t('התעלם מכולן'), value: true, danger: true }, { label: _t('ביטול'), value: false }]);
     if (!ok) return;
     for (const x of S.unmatched) D.imported[x.key] = 'ignored';
     S.unmatched = [];
@@ -725,7 +733,7 @@ async function onInboxClick(e) {
     if (alias) { m.aliases = m.aliases || []; if (!m.aliases.some((a) => norm(a) === norm(alias))) m.aliases.push(alias); }
     const r = importPrints(lib, S.sync);
     S.unmatched = r.unmatched;
-    toast(`שויכה ל„${m.name}”${r.added ? ` · ועוד ${r.added} הדפסות באותו שם` : ''}`);
+    toast(_t`שויכה ל„${m.name}”${r.added ? _t` · ועוד ${r.added} הדפסות באותו שם` : ''}`);
   }
   if (t.closest('[data-ignoreall]') || ig || as) { lib.save(); renderAll(); }
 }
@@ -733,7 +741,7 @@ function pickModel(entry) {
   return new Promise((resolve) => {
     const d = document.createElement('div');
     d.className = 'dialog';
-    d.innerHTML = `<div class="box wide"><h3>לאיזה מודל שייכת „${esc(entry.title || entry.design || '')}”?</h3>
+    d.innerHTML = _t`<div class="box wide"><h3>לאיזה מודל שייכת „${esc(entry.title || entry.design || '')}”?</h3>
       <input class="inp" id="pmq" placeholder="חיפוש מודל" value="${esc((entry.title || '').replace(/[_-]+/g, ' ').replace(/\s*plate\s*\d+$/i, '').trim())}">
       <div class="pmlist" id="pml"></div>
       <div class="actions" style="margin-top:12px"><button class="btn" data-no>ביטול</button></div></div>`;
@@ -741,7 +749,7 @@ function pickModel(entry) {
     const draw = () => {
       const q = $('#pmq', d).value.trim().toLowerCase().split(/\s+/).filter(Boolean);
       const list = M.list().filter((m) => { const h = (m.name + ' ' + m.versions.map((v) => v.path).join(' ') + ' ' + (m.aliases || []).join(' ')).toLowerCase(); return q.every((w) => h.includes(w)); }).slice(0, 60);
-      $('#pml', d).innerHTML = list.length ? list.map((m) => { const p = M.cur(m).path; const u = lib.thumbURLs.get(p); return `<button class="pmi" data-pick="${m.id}">${u ? `<img src="${u}" alt="">` : '<span class="pmt"></span>'}<span class="pmn">${esc(m.name)}</span><span class="pmp mono">${esc(p)}</span></button>`; }).join('') : '<div class="hint">לא נמצאו מודלים. נסה מילה אחרת.</div>';
+      $('#pml', d).innerHTML = list.length ? list.map((m) => { const p = M.cur(m).path; const u = lib.thumbURLs.get(p); return `<button class="pmi" data-pick="${m.id}">${u ? `<img src="${u}" alt="">` : '<span class="pmt"></span>'}<span class="pmn">${esc(m.name)}</span><span class="pmp mono">${esc(p)}</span></button>`; }).join('') : _t('<div class="hint">לא נמצאו מודלים. נסה מילה אחרת.</div>');
     };
     d.addEventListener('click', (e) => {
       const p = e.target.closest('[data-pick]');
@@ -784,7 +792,7 @@ async function runQueue() {
   Q.running = true;
   while (Q.list.length) {
     const path = Q.list.shift();
-    setProgress('מכין תמונות', Q.done / Q.total);
+    setProgress(_t('מכין תמונות'), Q.done / Q.total);
     await makeThumb(path);
     Q.done++;
     refreshThumb(path);
@@ -818,7 +826,7 @@ async function makeThumb(path) {
       }
     }
     if (!wrote) {
-      if (file.size > 400e6) throw new Error('קובץ גדול מדי לתמונה ממוזערת');
+      if (file.size > 400e6) throw new Error(_t('קובץ גדול מדי לתמונה ממוזערת'));
       const parsed = await parseAsync(path, buf.slice(0), { budget: 6e5 }, 'thumb');
       const pl = parsed.meta.plates && parsed.meta.plates[0];
       const { blob, dims } = await renderThumbnail(pl ? parsed.parts.filter((p) => p.plate === pl.id) : parsed.parts);
@@ -852,21 +860,21 @@ async function refreshThumb(path) {
 }
 function placeholder(path) {
   const rec = M.rec(path);
-  if (rec.missing) return `<div class="ph">${I.cube}<span>הקובץ חסר</span></div>`;
-  if (rec.failed) return `<div class="ph" title="${esc(rec.error || '')}">${I.cube}<span>אין תצוגה</span></div>`;
+  if (rec.missing) return _t`<div class="ph">${I.cube}<span>הקובץ חסר</span></div>`;
+  if (rec.failed) return _t`<div class="ph" title="${esc(rec.error || '')}">${I.cube}<span>אין תצוגה</span></div>`;
   return `<div class="ph"><div class="spin"></div></div>`;
 }
 
 /* ================= shell ================= */
 function renderShell() {
-  $('#root').innerHTML = `
+  $('#root').innerHTML = _t`
   <div id="app">
     <header class="top">
       <div class="logo"><span class="logo-mark">${I.mark}</span>PrintLog</div>
       <div class="search">${I.search}<input id="q" placeholder="חיפוש לפי שם, תגית, הערה, מעצב…" autocomplete="off"><kbd>/</kbd></div>
       <div class="spacer"></div>
       <button class="btn ghost ppill" id="ppill" title="חיבור למדפסת"></button>
-      <span class="folder-chip" title="${S.internalLib ? 'תצוגת ענן, בלי תיקייה' : esc(lib.root.name)}">${S.internalLib ? I.cloud + 'ענן' : I.folder + esc(lib.root.name)}</span>
+      <span class="folder-chip" title="${S.internalLib ? _t('תצוגת ענן, בלי תיקייה') : esc(lib.root.name)}">${S.internalLib ? I.cloud + _t('ענן') : I.folder + esc(lib.root.name)}</span>
       <button class="btn icon-btn ghost" id="theme" title="מצב תצוגה">${I.theme}</button>
       <button class="btn" id="settings" title="הגדרות">${I.gear}<span>הגדרות</span></button>
       <button class="btn" id="rescan" title="סרוק מחדש">${I.refresh}<span>רענן</span></button>
@@ -887,12 +895,12 @@ function renderShell() {
     if (native) {
       const st = await native.sync.getState();
       if (st.cloud?.loggedIn && (st.mode === 'cloud' || st.mode === 'both')) {
-        setProgress('מושך היסטוריית הדפסות מ-Bambu…', null);
+        setProgress(_t('מושך היסטוריית הדפסות מ-Bambu…'), null);
         const r = await native.sync.syncNow();
         setProgress(null);
         await syncPrints(true);
-        if (r && r.ok === false && !r.skipped) toast('המשיכה מ-Bambu נכשלה: ' + (r.error || ''), true);
-        else if (r && r.ok && !r.added) toast('אין הדפסות חדשות ב-Bambu');
+        if (r && r.ok === false && !r.skipped) toast(_t('המשיכה מ-Bambu נכשלה: ') + (r.error || ''), true);
+        else if (r && r.ok && !r.added) toast(_t('אין הדפסות חדשות ב-Bambu'));
       }
     }
   };
@@ -936,7 +944,7 @@ function renderShell() {
   let dragDepth = 0;
   const dz = document.createElement('div');
   dz.className = 'dropzone hidden';
-  dz.textContent = 'שחרר כדי להוסיף לתיקייה';
+  dz.textContent = _t('שחרר כדי להוסיף לתיקייה');
   document.body.appendChild(dz);
   window.addEventListener('dragenter', (e) => { if (S.open || !hasFiles(e)) return; dragDepth++; dz.classList.remove('hidden'); });
   window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dz.classList.add('hidden'); } });
@@ -953,19 +961,19 @@ function renderShell() {
     if (e.target.matches('input,textarea,select')) { if (e.key === 'Escape') e.target.blur(); return; }
     if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
     if (e.key === 'Escape') { if (S.open) closeModal(); else if (S.selected.size) { S.selected.clear(); renderGrid(); renderBulk(); } }
-    if (S.open && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) stepModel(e.key === 'ArrowLeft' ? 1 : -1);
+    if (S.open && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) stepModel(e.key === (getLang() === 'en' ? 'ArrowRight' : 'ArrowLeft') ? 1 : -1);
   });
 }
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
 
 async function importFiles(files) {
   files = files.filter((f) => fileKind(f.name));
-  if (!files.length) { toast('אפשר להוסיף רק קבצי STL או 3MF', true); return; }
+  if (!files.length) { toast(_t('אפשר להוסיף רק קבצי STL או 3MF'), true); return; }
   const dir = S.folder || '';
   for (const f of files) {
-    try { await lib.importFile(f, dir); } catch (e) { toast(`ההעתקה של ${f.name} נכשלה: ${e.message}`, true); }
+    try { await lib.importFile(f, dir); } catch (e) { toast(_t`ההעתקה של ${f.name} נכשלה: ${e.message}`, true); }
   }
-  toast(`${files.length} קבצים נוספו${dir ? ' לתיקייה ' + dir : ''}`);
+  toast(_t`${files.length} קבצים נוספו${dir ? _t(' לתיקייה ') + dir : ''}`);
   await rescan(false);
 }
 
@@ -993,33 +1001,33 @@ function renderSidebar() {
   const okRuns = items.reduce((a, it) => a + it.n.ok, 0);
   const cnt = (fn) => models.filter(fn).length;
   const pv = [
-    ['ok', 'הדפסות שהצליחו', '<span class="dot sdot ok"></span>', items.filter((it) => it.n.ok).length],
-    ['fail', 'הדפסות שנכשלו', '<span class="dot sdot fail"></span>', items.filter((it) => it.n.fail + it.n.cancel).length],
-    ['history', 'כל ההדפסות', I.printer, runs],
+    ['ok', _t('הדפסות שהצליחו'), '<span class="dot sdot ok"></span>', items.filter((it) => it.n.ok).length],
+    ['fail', _t('הדפסות שנכשלו'), '<span class="dot sdot fail"></span>', items.filter((it) => it.n.fail + it.n.cancel).length],
+    ['history', _t('כל ההדפסות'), I.printer, runs],
   ];
   const fv = [
-    ['all', 'כל הקבצים', I.all, models.length],
-    ['fav', 'מועדפים', I.starO, cnt((m) => m.favorite)],
-    ['never', 'עוד לא הודפסו', '<span class="dot sdot never"></span>', cnt((m) => M.status(m) === 'never')],
-    ['versions', 'עם כמה גרסאות', I.merge, cnt((m) => m.versions.length > 1)],
+    ['all', _t('כל הקבצים'), I.all, models.length],
+    ['fav', _t('מועדפים'), I.starO, cnt((m) => m.favorite)],
+    ['never', _t('עוד לא הודפסו'), '<span class="dot sdot never"></span>', cnt((m) => M.status(m) === 'never')],
+    ['versions', _t('עם כמה גרסאות'), I.merge, cnt((m) => m.versions.length > 1)],
   ];
   const nav = ([k, l, ic, c]) => `<button class="nav-item ${S.view === k && !S.tag && S.folder == null ? 'active' : ''}" data-nav="view" data-val="${k}">${ic}<span class="lbl">${l}</span><span class="count">${c}</span></button>`;
-  const folderList = [...folders.entries()].filter(([d]) => !d.startsWith("@gdrive")).sort((a, b) => a[0].localeCompare(b[0], 'he'));
-  const fname = (d) => (d === '@models' ? 'הורדו מ-Bambu' : d === '@archive' ? '☁ ארכיון' : d.startsWith('@archive/') ? '☁ ' + d.slice(9) : d || 'תיקייה ראשית');
-  $('#side').innerHTML = `
+  const folderList = [...folders.entries()].filter(([d]) => !d.startsWith("@gdrive")).sort((a, b) => a[0].localeCompare(b[0], loc()));
+  const fname = (d) => (d === '@models' ? _t('הורדו מ-Bambu') : d === '@archive' ? _t('☁ ארכיון') : d.startsWith('@archive/') ? '☁ ' + d.slice(9) : d || _t('תיקייה ראשית'));
+  $('#side').innerHTML = _t`
     <div class="stats">
       <div class="stat"><b>${runs}</b><span>הדפסות</span></div>
       <div class="stat"><b>${runs ? Math.round((okRuns / runs) * 100) + '%' : '–'}</b><span>הצליחו</span></div>
     </div>
     <h4>הדפסות</h4>
     ${pv.map(nav).join('')}
-    ${native && native.sync.printer ? Object.entries((S.sync && S.sync.printers) || {}).map(([sn, p]) => `<button class="nav-item" data-pscreen="${esc(sn)}" title="מסך המדפסת: טמפרטורות, AMS, תקלות וסטטיסטיקה">${I.printer}<span class="lbl">${esc(p.name || sn)}</span><span class="count"><span class="pdot ${['running', 'prepare'].includes(p.state) ? 'run' : p.conn === 'offline' || p.conn === 'error' ? 'off' : 'idle'}"></span></span></button>`).join('') : ''}
+    ${native && native.sync.printer ? Object.entries((S.sync && S.sync.printers) || {}).map(([sn, p]) => _t`<button class="nav-item" data-pscreen="${esc(sn)}" title="מסך המדפסת: טמפרטורות, AMS, תקלות וסטטיסטיקה">${I.printer}<span class="lbl">${esc(p.name || sn)}</span><span class="count"><span class="pdot ${['running', 'prepare'].includes(p.state) ? 'run' : p.conn === 'offline' || p.conn === 'error' ? 'off' : 'idle'}"></span></span></button>`).join('') : ''}
     <button class="nav-item" data-printer style="margin-top:2px">${I.gear}<span class="lbl">הגדרות וחיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
-    <h4>${S.internalLib ? 'קבצים' : 'תיקייה'}</h4>
+    <h4>${S.internalLib ? _t('קבצים') : _t('תיקייה')}</h4>
     ${fv.map(nav).join('')}
     ${srcNav(models)}
     ${!S.internalLib && folderList.filter(([d]) => !d.startsWith('@')).length > 1 ? folderList.filter(([d]) => !d.startsWith('@')).map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}
-    ${tags.size ? `<h4>תגיות</h4>${[...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'he')).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('')}` : ''}
+    ${tags.size ? _t`<h4>תגיות</h4>${[...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], loc())).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('')}` : ''}
   `;
 }
 
@@ -1094,17 +1102,17 @@ async function playTimelapse(rel) {
     const dir = await lib.meta.getDirectoryHandle('timelapse');
     url = URL.createObjectURL(await (await dir.getFileHandle(rel.replace(/^timelapse\//, ''))).getFile());
   } catch { }
-  if (!url) { toast('הטיימלפס לא נמצא במחשב'); return; }
+  if (!url) { toast(_t('הטיימלפס לא נמצא במחשב')); return; }
   const d = document.createElement('div');
   d.className = 'dialog';
-  d.innerHTML = `<div class="box wide"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">טיימלפס</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div><video src="${url}" controls autoplay style="width:100%;max-height:70vh;border-radius:10px;background:#000"></video></div>`;
+  d.innerHTML = _t`<div class="box wide"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">טיימלפס</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div><video src="${url}" controls autoplay style="width:100%;max-height:70vh;border-radius:10px;background:#000"></video></div>`;
   const close = () => { d.remove(); URL.revokeObjectURL(url); };
   d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) close(); });
   document.body.appendChild(d);
 }
 
 // where a model's current file lives: the connected folder, downloaded from Bambu Cloud, or Drive / the archive
-const SRC = { local: ['במחשב', 'folder'], bambu: ['מ-Bambu Cloud', 'bambuDl'], drive: ['ב-Drive / ארכיון', 'driveOk'] };
+const SRC = { local: [_t('במחשב'), 'folder'], bambu: [_t('מ-Bambu Cloud'), 'bambuDl'], drive: [_t('ב-Drive / ארכיון'), 'driveOk'] };
 function srcOf(m) {
   const p = M.cur(m).path;
   return p.startsWith('@models/') ? 'bambu' : isArchived(p) ? 'drive' : 'local';
@@ -1123,22 +1131,22 @@ function srcNav(models) {
 function cloudBtn(m) {
   if (!native || !m) return '';
   const p = M.cur(m).path;
-  if (/^@(gdrive|archive)\//.test(p)) return `<button class="cloudbtn on" data-cloud="${m.id}" title="${p.startsWith('@gdrive/') ? 'ב-Google Drive. לחיצה: החזר לתיקייה' : 'בארכיון'}">${I.driveOk}</button>`;
-  if (p.startsWith('@models/')) return `<span class="cloudbtn bambu" title="הורד מ-Bambu Cloud ונשמר במחשב">${I.bambuDl}</span>`;
+  if (/^@(gdrive|archive)\//.test(p)) return `<button class="cloudbtn on" data-cloud="${m.id}" title="${p.startsWith('@gdrive/') ? _t('ב-Google Drive. לחיצה: החזר לתיקייה') : _t('בארכיון')}">${I.driveOk}</button>`;
+  if (p.startsWith('@models/')) return _t`<span class="cloudbtn bambu" title="הורד מ-Bambu Cloud ונשמר במחשב">${I.bambuDl}</span>`;
   if (!hasLocal(m) || !archiveOn()) return '';
-  return `<button class="cloudbtn" data-cloud="${m.id}" title="רק במחשב. לחיצה: העלה ל-Google Drive">${I.driveUp}</button>`;
+  return _t`<button class="cloudbtn" data-cloud="${m.id}" title="רק במחשב. לחיצה: העלה ל-Google Drive">${I.driveUp}</button>`;
 }
 async function onCloudBtn(id) {
   const m = lib.data.models[id];
   if (!m) return;
   const p = M.cur(m).path;
   if (p.startsWith('@gdrive/')) {
-    const ok = await dialog('להחזיר את הקובץ לתיקייה?', `„${esc(m.name)}” יורד מ-Google Drive לתיקיית המודלים וימחק מ-Drive.`, [{ label: 'החזר', value: true, primary: true }, { label: 'ביטול', value: false }]);
+    const ok = await dialog(_t('להחזיר את הקובץ לתיקייה?'), _t`„${esc(m.name)}” יורד מ-Google Drive לתיקיית המודלים וימחק מ-Drive.`, [{ label: _t('החזר'), value: true, primary: true }, { label: _t('ביטול'), value: false }]);
     if (ok) await restoreModel(m);
     return;
   }
   if (p.startsWith('@archive/')) return;
-  if (!archiveOn()) { toast('כדי להעלות לענן, התחבר ל-Google Drive בהגדרות'); printerDialog(); return; }
+  if (!archiveOn()) { toast(_t('כדי להעלות לענן, התחבר ל-Google Drive בהגדרות')); printerDialog(); return; }
   await archiveModels([m]);
 }
 /* ---------- background model downloads (run in the app's main process, not in the window) ---------- */
@@ -1157,7 +1165,7 @@ function dlState(it, k) {
   return { state: S.autoModels === false ? 'off' : 'queued' };
 }
 const dlClass = (s) => ({ queued: 'pending', off: 'pending', dl: 'dl', error: 'nofile', done: 'dl' }[s.state] || '');
-const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? `מוריד ${Math.round((s.p || 0) * 100)}%` : 'מוריד…') : s.state === 'error' ? 'אין קובץ ב-Bambu' : s.state === 'off' ? 'לחץ להורדה' : 'ממתין להורדה');
+const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? _t`מוריד ${Math.round((s.p || 0) * 100)}%` : _t('מוריד…')) : s.state === 'error' ? _t('אין קובץ ב-Bambu') : s.state === 'off' ? _t('לחץ להורדה') : _t('ממתין להורדה'));
 function applyDl(el, s) {
   el.classList.remove('pending', 'dl', 'nofile');
   const c = dlClass(s); if (c) el.classList.add(c);
@@ -1213,10 +1221,10 @@ async function attachDownloads() {
 }
 
 function itemFileBadge(it) {
-  if (!it.model) return '<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>';
+  if (!it.model) return _t('<span class="badge" title="אין קובץ מתאים בתיקייה">אין קובץ</span>');
   const p = M.cur(it.model).path;
-  if (p.startsWith('@models/')) return '<span class="badge" title="המודל הורד מ-Bambu ונשמר אצלך">⬇ Bambu</span>';
-  return isArchived(p) ? '<span class="badge" title="הקובץ בארכיון בענן">☁ ארכיון</span>' : '<span class="badge" title="הקובץ בתיקייה">📁</span>';
+  if (p.startsWith('@models/')) return _t('<span class="badge" title="המודל הורד מ-Bambu ונשמר אצלך">⬇ Bambu</span>');
+  return isArchived(p) ? _t('<span class="badge" title="הקובץ בארכיון בענן">☁ ארכיון</span>') : _t('<span class="badge" title="הקובץ בתיקייה">📁</span>');
 }
 
 function itemCardHTML(it, kind) {
@@ -1226,15 +1234,15 @@ function itemCardHTML(it, kind) {
   const local = it.model ? (it.plate && platesOf(it.model).length > 1 ? lib.thumbURLs.get(path + '#' + it.plate) : lib.thumbURLs.get(path)) : null;
   const cached = coverCache.get(it.cover);
   const url = cached || local;
-  const when = (t) => { try { return new Date(t).toLocaleDateString('he-IL', { day: 'numeric', month: 'short' }); } catch { return ''; } };
+  const when = (t) => { try { return new Date(t).toLocaleDateString(loc(), { day: 'numeric', month: 'short' }); } catch { return ''; } };
   const sel = it.model && S.selected.has(it.model.id);
   // no file yet: the card stays grey until its model has been downloaded from Bambu in the background
   const dk = !it.model ? dlKey(it) : '';
   const ds = dk ? dlState(it, dk) : null;
   return `<div class="card ${sel ? 'selected' : ''} ${ds ? dlClass(ds) : ''}" data-item="${esc(it.key)}" ${it.model ? `data-id="${it.model.id}"` : ''} ${dk ? `data-dlkey="${esc(dk)}" style="--p:${ds.p || 0}"` : ''}>
-    <div class="thumbwrap">${cloudBtn(it.model)}${it.timelapse ? `<button class="tlbtn" data-tl="${esc(it.timelapse)}" title="טיימלפס של ההדפסה">${I.play}</button>` : ''}${dk ? `<div class="dlbar"><i></i></div><span class="dlmsg">${dlLabel(ds)}</span>` : ''}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
-    <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${it.model || dk ? '' : itemFileBadge(it)}</div>
-    ${it.model ? `<div class="check" data-check title="בחר">${I.check}</div>` : ''}
+    <div class="thumbwrap">${cloudBtn(it.model)}${it.timelapse ? _t`<button class="tlbtn" data-tl="${esc(it.timelapse)}" title="טיימלפס של ההדפסה">${I.play}</button>` : ''}${dk ? `<div class="dlbar"><i></i></div><span class="dlmsg">${dlLabel(ds)}</span>` : ''}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
+    <div class="badges">${it.plate && it.multiPlate ? _t`<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${it.model || dk ? '' : itemFileBadge(it)}</div>
+    ${it.model ? _t`<div class="check" data-check title="בחר">${I.check}</div>` : ''}
     <div class="body">
       <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
       ${it.design ? `<div class="sub" style="margin-top:0">${esc(it.design)}</div>` : ''}
@@ -1252,7 +1260,7 @@ function renderItems(kind) {
   S.items = new Map(list.map((it) => [it.key, it]));
   const g = $('#grid');
   if (!list.length) {
-    g.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>${kind === 'ok' ? 'עוד אין הדפסות שהצליחו' : 'אין הדפסות שנכשלו'}</b>${S.sync ? '' : 'התחבר ל-Bambu ב„חיבור למדפסת” כדי לייבא את היסטוריית ההדפסות.'}</div>`;
+    g.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>${kind === 'ok' ? _t('עוד אין הדפסות שהצליחו') : _t('אין הדפסות שנכשלו')}</b>${S.sync ? '' : _t('התחבר ל-Bambu ב„חיבור למדפסת” כדי לייבא את היסטוריית ההדפסות.')}</div>`;
     return;
   }
   S.visible = [...new Set(list.filter((it) => it.model).map((it) => it.model.id))];
@@ -1277,19 +1285,19 @@ async function itemDialog(it) {
   // a cloud print can bring its own 3MF: download it and open the full 3D view
   const cloudEnt = native && native.sync.fetchModel && S.sync && (it.runs.map((r) => r.entry).find((e) => e && /^cloud-/.test(e.key || '')) || null);
   const fil = (r) => (r.filaments || []).map((f) => `<span class="fil">${f.color ? `<span class="swatch" style="background:${esc(f.color)}"></span>` : ''}<span>${esc(f.type || '')}</span>${f.grams ? `<span class="ltr" style="color:var(--ink3)">${f.grams}g</span>` : ''}</span>`).join('');
-  const when = (t) => { try { return new Date(t).toLocaleString('he-IL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
-  d.innerHTML = `<div class="box wide item-box">
-    <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">${esc(it.name)}${it.plate && it.multiPlate ? ` <span class="badge accent">פלטה ${it.plate}</span>` : ''}</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
+  const when = (t) => { try { return new Date(t).toLocaleString(loc(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  d.innerHTML = _t`<div class="box wide item-box">
+    <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">${esc(it.name)}${it.plate && it.multiPlate ? _t` <span class="badge accent">פלטה ${it.plate}</span>` : ''}</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
     ${it.design ? `<div class="hint" style="margin:2px 0 8px">${esc(it.design)}</div>` : ''}
     <div class="item-top">
-      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}${cloudEnt ? `<div class="item-fetch"><div class="spin"></div><span>מוריד את המודל מ-Bambu לתצוגה בתלת-ממד…</span></div>` : ''}</div>
+      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}${cloudEnt ? _t`<div class="item-fetch"><div class="spin"></div><span>מוריד את המודל מ-Bambu לתצוגה בתלת-ממד…</span></div>` : ''}</div>
       <dl class="kv">
-        <dt>הדפסות</dt><dd>${it.runs.length} · ${it.n.ok} הצליחו${it.n.fail ? ` · ${it.n.fail} נכשלו` : ''}${it.n.cancel ? ` · ${it.n.cancel} בוטלו` : ''}</dd>
-        ${r0.printer ? `<dt>מדפסת</dt><dd>${esc(r0.printer)}</dd>` : ''}
-        ${r0.filaments && r0.filaments.length ? `<dt>פילמנט</dt><dd>${fil(r0)}</dd>` : ''}
-        ${r0.minutes ? `<dt>זמן</dt><dd>${fmtDur(r0.minutes * 60)}</dd>` : ''}
-        ${r0.grams ? `<dt>משקל</dt><dd>${r0.grams} g</dd>` : ''}
-        <dt>קובץ</dt><dd><span data-fstat>${cloudEnt ? 'מוריד מ-Bambu…' : 'אין קובץ מתאים בתיקייה'}</span> <button class="btn small" data-link>שייך לקובץ…</button></dd>
+        <dt>הדפסות</dt><dd>${it.runs.length} · ${it.n.ok} הצליחו${it.n.fail ? _t` · ${it.n.fail} נכשלו` : ''}${it.n.cancel ? _t` · ${it.n.cancel} בוטלו` : ''}</dd>
+        ${r0.printer ? _t`<dt>מדפסת</dt><dd>${esc(r0.printer)}</dd>` : ''}
+        ${r0.filaments && r0.filaments.length ? _t`<dt>פילמנט</dt><dd>${fil(r0)}</dd>` : ''}
+        ${r0.minutes ? _t`<dt>זמן</dt><dd>${fmtDur(r0.minutes * 60)}</dd>` : ''}
+        ${r0.grams ? _t`<dt>משקל</dt><dd>${r0.grams} g</dd>` : ''}
+        <dt>קובץ</dt><dd><span data-fstat>${cloudEnt ? _t('מוריד מ-Bambu…') : _t('אין קובץ מתאים בתיקייה')}</span> <button class="btn small" data-link>שייך לקובץ…</button></dd>
       </dl>
     </div>
     <div class="section-title">כל ההדפסות</div>
@@ -1308,7 +1316,7 @@ async function itemDialog(it) {
       S.unmatched = r.unmatched;
       lib.save();
       d.remove();
-      toast(`שויך ל„${m.name}”`);
+      toast(_t`שויך ל„${m.name}”`);
       renderAll();
     }
   });
@@ -1319,7 +1327,7 @@ async function itemDialog(it) {
 async function fetchCloudModel(it, ent, d) {
   const fail = (msg) => {
     const f = $('.item-fetch', d); if (f) f.remove();
-    const s = $('[data-fstat]', d); if (s) s.textContent = 'אין קובץ בתיקייה, ו-Bambu לא החזירו את המודל';
+    const s = $('[data-fstat]', d); if (s) s.textContent = _t('אין קובץ בתיקייה, ו-Bambu לא החזירו את המודל');
     if (msg) console.warn('fetchModel', msg);
   };
   const r = await native.sync.fetchModel(ent.key);
@@ -1361,7 +1369,7 @@ function filtered() {
   const by = {
     // last activity: the file changed or the model was printed, whichever is newer
     recent: (a, b) => M.activity(b) - M.activity(a),
-    name: (a, b) => a.name.localeCompare(b.name, 'he'),
+    name: (a, b) => a.name.localeCompare(b.name, loc()),
     printed: (a, b) => (M.lastPrint(b) || '').localeCompare(M.lastPrint(a) || '') || M.mtime(b) - M.mtime(a),
     size: (a, b) => (M.rec(M.cur(b).path).size || 0) - (M.rec(M.cur(a).path).size || 0),
   }[S.sort];
@@ -1373,15 +1381,15 @@ function renderToolbar() {
   const hist = S.view === 'history' && !S.tag && S.folder == null;
   const itemsView = (S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null;
   const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : itemsView ? printItems().filter((it) => (S.view === 'ok' ? it.n.ok : it.n.fail + it.n.cancel + it.n.partial)).length : filtered().length;
-  const title = (S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל הקבצים', fav: 'מועדפים', ok: 'הדפסות שהצליחו', fail: 'הדפסות שנכשלו', never: 'עוד לא הודפסו', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'כל ההדפסות' }[S.view]) + (S.src && !inbox && !hist && !itemsView ? ' · ' + SRC[S.src][0] : '');
+  const title = (S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || _t('תיקייה ראשית')) : { all: _t('כל הקבצים'), fav: _t('מועדפים'), ok: _t('הדפסות שהצליחו'), fail: _t('הדפסות שנכשלו'), never: _t('עוד לא הודפסו'), versions: _t('עם כמה גרסאות'), inbox: _t('הדפסות לא משויכות'), history: _t('כל ההדפסות') }[S.view]) + (S.src && !inbox && !hist && !itemsView ? ' · ' + SRC[S.src][0] : '');
   $('#toolbar').innerHTML = `
-    <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : itemsView ? 'פריטים' : 'קבצים'}</span>
-    ${S.tag || S.folder != null || S.src || S.q ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
+    <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? _t('הדפסות') : itemsView ? _t('פריטים') : _t('קבצים')}</span>
+    ${S.tag || S.folder != null || S.src || S.q ? _t('<button class="btn small ghost" data-clear>נקה סינון</button>') : ''}
     <span id="prog" class="progress"></span>
-    ${native && archiveOn() && S.view === 'ok' && itemsView ? (toArchive().length ? `<button class="btn small" data-archiveall title="מעלה ל-Drive את הקבצים של כל מה שהצליח ומוחק אותם מהמחשב">☁ העלה ל-Drive (${toArchive().length})</button>` : `<span class="btn small ghost" style="cursor:default" title="כל הקבצים של הדפסות שהצליחו כבר בארכיון">☁ הכול בארכיון</span>`) : ''}
+    ${native && archiveOn() && S.view === 'ok' && itemsView ? (toArchive().length ? _t`<button class="btn small" data-archiveall title="מעלה ל-Drive את הקבצים של כל מה שהצליח ומוחק אותם מהמחשב">☁ העלה ל-Drive (${toArchive().length})</button>` : _t`<span class="btn small ghost" style="cursor:default" title="כל הקבצים של הדפסות שהצליחו כבר בארכיון">☁ הכול בארכיון</span>`) : ''}
     <span class="spacer" style="flex:1"></span>
-    ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist && !itemsView ? `<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
-    ${hist || itemsView ? '' : `<select class="sel" id="sort">
+    ${M.list().some((m) => platesOf(m).length > 1) && !inbox && !hist && !itemsView ? _t`<label class="chk" style="margin:0;font-size:13px" title="בפרויקט עם כמה פלטות, כל פלטה היא הדפסה נפרדת"><input type="checkbox" id="splitp" ${lib.data.prefs?.splitPlates !== false ? 'checked' : ''}> כל פלטה בנפרד</label>` : ''}
+    ${hist || itemsView ? '' : _t`<select class="sel" id="sort">
       <option value="recent" ${S.sort === 'recent' ? 'selected' : ''}>עודכן לאחרונה</option>
       <option value="printed" ${S.sort === 'printed' ? 'selected' : ''}>הדפסה אחרונה ביומן</option>
       <option value="name" ${S.sort === 'name' ? 'selected' : ''}>שם</option>
@@ -1400,17 +1408,17 @@ function cardHTML({ m, plate }) {
   const plates = platesOf(m);
   const pst = plates.length > 1 ? plateStatus(m) : null;
   const okPlates = pst ? plates.filter((p) => pst[p.id] === 'ok').length : 0;
-  const stLabel = st === 'never' ? (plates.length > 1 ? `${plates.length} פלטות · אין הדפסה רשומה` : 'אין הדפסה רשומה')
-    : pst && Object.keys(pst).length ? `${okPlates}/${plates.length} פלטות הודפסו · ${fmtDate(M.lastPrint(m))}`
-    : `${RESULT[st]} · ${fmtDate(M.lastPrint(m))}${m.prints.length > 1 ? ` · ${m.prints.length} הדפסות` : ''}`;
+  const stLabel = st === 'never' ? (plates.length > 1 ? _t`${plates.length} פלטות · אין הדפסה רשומה` : _t('אין הדפסה רשומה'))
+    : pst && Object.keys(pst).length ? _t`${okPlates}/${plates.length} פלטות הודפסו · ${fmtDate(M.lastPrint(m))}`
+    : `${RESULT[st]} · ${fmtDate(M.lastPrint(m))}${m.prints.length > 1 ? _t` · ${m.prints.length} הדפסות` : ''}`;
   return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}">
     <div class="thumbwrap">${cloudBtn(m)}<div class="thumb" data-thumb="${esc(v.path)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
-    <div class="badges"><span class="badge">${kind === 'stl' ? 'STL' : '3MF'}</span>${kind === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}${m.versions.length > 1 ? `<span class="badge accent">${m.versions.length} גרסאות</span>` : ''}</div>
+    <div class="badges"><span class="badge">${kind === 'stl' ? 'STL' : '3MF'}</span>${kind === 'gcode3mf' ? _t('<span class="badge accent">פרוס</span>') : ''}${m.versions.length > 1 ? _t`<span class="badge accent">${m.versions.length} גרסאות</span>` : ''}</div>
     <div class="check" data-check>${I.check}</div>
     ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
     <div class="body">
       <div class="name" title="${esc(m.name)}">${esc(m.name)}</div>
-      <div class="sub"><span class="st"><span class="sdot ${st}"></span>${stLabel}</span>${rec.missing ? ' · <span style="color:var(--fail)">חסר</span>' : ''}</div>
+      <div class="sub"><span class="st"><span class="sdot ${st}"></span>${stLabel}</span>${rec.missing ? _t(' · <span style="color:var(--fail)">חסר</span>') : ''}</div>
       ${m.tags.length ? `<div class="tags">${m.tags.slice(0, 4).map((t) => tagHTML(t)).join('')}${m.tags.length > 4 ? `<span class="tag" style="--h:0;filter:grayscale(1)">+${m.tags.length - 4}</span>` : ''}</div>` : ''}
     </div>
   </div>`;
@@ -1423,17 +1431,17 @@ function plateCardHTML(m, plate) {
   const plates = platesOf(m);
   const prints = m.prints.filter((p) => +p.plateNo === plate.id).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || '').localeCompare(a.at || ''));
   const st = plateStatus(m)[plate.id] || 'never';
-  const stLabel = st === 'never' ? 'אין הדפסה רשומה' : `${RESULT[st]} · ${fmtDate(prints[0].date)}${prints.length > 1 ? ` · ${prints.length} הדפסות` : ''}`;
+  const stLabel = st === 'never' ? _t('אין הדפסה רשומה') : `${RESULT[st]} · ${fmtDate(prints[0].date)}${prints.length > 1 ? _t` · ${prints.length} הדפסות` : ''}`;
   const key = v.path + '#' + plate.id;
   const url = lib.thumbURLs.get(key);
-  return `<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}" data-plate="${plate.id}">
+  return _t`<div class="card ${S.selected.has(m.id) ? 'selected' : ''}" data-id="${m.id}" data-plate="${plate.id}">
     <div class="thumbwrap">${cloudBtn(m)}<div class="thumb" data-pthumb="${esc(key)}">${url ? `<img src="${url}" alt="" loading="lazy">` : placeholder(v.path)}</div></div>
-    <div class="badges"><span class="badge accent">פלטה ${plate.id}/${plates.length}</span>${fileKind(v.path) === 'gcode3mf' ? '<span class="badge accent">פרוס</span>' : ''}</div>
+    <div class="badges"><span class="badge accent">פלטה ${plate.id}/${plates.length}</span>${fileKind(v.path) === 'gcode3mf' ? _t('<span class="badge accent">פרוס</span>') : ''}</div>
     <div class="check" data-check>${I.check}</div>
     ${m.favorite ? `<span class="fav">${I.star}</span>` : ''}
     <div class="body">
       <div class="name" title="${esc(m.name)}">${esc(m.name)}${plate.name ? ` <span style="color:var(--ink3);font-weight:500">· ${esc(plate.name)}</span>` : ''}</div>
-      <div class="sub"><span class="st"><span class="sdot ${st}"></span>${stLabel}</span>${rec.missing ? ' · <span style="color:var(--fail)">חסר</span>' : ''}</div>
+      <div class="sub"><span class="st"><span class="sdot ${st}"></span>${stLabel}</span>${rec.missing ? _t(' · <span style="color:var(--fail)">חסר</span>') : ''}</div>
       ${m.tags.length ? `<div class="tags">${m.tags.slice(0, 3).map((t) => tagHTML(t)).join('')}</div>` : ''}
     </div>
   </div>`;
@@ -1469,7 +1477,7 @@ function renderHistory() {
   const rows = historyRows();
   S.items = new Map(rows.map(({ it }) => [it.key, it]));
   const g = $('#grid');
-  const when = (t) => { try { return new Date(t).toLocaleString('he-IL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  const when = (t) => { try { return new Date(t).toLocaleString(loc(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   g.innerHTML = `<div class="inbox hist" style="grid-column:1/-1">
     ${rows.length ? rows.slice(0, 600).map(({ it, r }) => {
       const path = it.model ? M.cur(it.model).path : '';
@@ -1478,11 +1486,11 @@ function renderHistory() {
       const u = cached || local;
       return `<div class="irow" data-item="${esc(it.key)}" style="cursor:pointer">
         ${u ? `<img class="icover" src="${u}" alt="" style="object-fit:contain">` : `<div class="icover" ${r.coverFile || it.cover ? `data-cover="${esc(r.coverFile || it.cover)}"` : path ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}></div>`}
-        <div class="ii"><div class="it">${esc(it.name)}${it.plate && it.multiPlate ? ` <span class="badge accent">פלטה ${it.plate}</span>` : ''} ${itemFileBadge(it)}</div>
-          <div class="isub">${[when(r.t), r.printer, r.minutes ? fmtDur(r.minutes * 60) : '', r.grams ? r.grams + ' g' : '', (r.filaments || []).map((f) => f.type).filter(Boolean).join(' + '), r.source === 'manual' ? 'ידני' : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
+        <div class="ii"><div class="it">${esc(it.name)}${it.plate && it.multiPlate ? _t` <span class="badge accent">פלטה ${it.plate}</span>` : ''} ${itemFileBadge(it)}</div>
+          <div class="isub">${[when(r.t), r.printer, r.minutes ? fmtDur(r.minutes * 60) : '', r.grams ? r.grams + ' g' : '', (r.filaments || []).map((f) => f.type).filter(Boolean).join(' + '), r.source === 'manual' ? _t('ידני') : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
         <span class="pill ${r.result}">${RESULT[r.result] || r.result}</span>
       </div>`;
-    }).join('') : '<div class="empty"><b>עוד אין הדפסות</b>התחבר ל-Bambu ב„חיבור למדפסת”, או רשום הדפסה מתוך קובץ.</div>'}
+    }).join('') : _t('<div class="empty"><b>עוד אין הדפסות</b>התחבר ל-Bambu ב„חיבור למדפסת”, או רשום הדפסה מתוך קובץ.</div>')}
   </div>`;
   for (const el of $$('[data-cover]', g)) coverURL(el.dataset.cover).then((u) => { if (u) el.innerHTML = `<img src="${u}" alt="" style="width:100%;height:100%;object-fit:contain">`; });
   const seen = new Set();
@@ -1500,8 +1508,8 @@ function renderGrid() {
   g.classList.toggle('selecting', S.selected.size > 0);
   if (!list.length) {
     g.innerHTML = M.list().length
-      ? `<div class="empty" style="grid-column:1/-1"><b>אין תוצאות</b>נסה חיפוש אחר או נקה את הסינון.</div>`
-      : `<div class="empty" style="grid-column:1/-1"><b>התיקייה ריקה</b>גרור לכאן קבצי STL או 3MF, או שמור אותם לתיקייה ולחץ „רענן”.</div>`;
+      ? _t`<div class="empty" style="grid-column:1/-1"><b>אין תוצאות</b>נסה חיפוש אחר או נקה את הסינון.</div>`
+      : _t`<div class="empty" style="grid-column:1/-1"><b>התיקייה ריקה</b>גרור לכאן קבצי STL או 3MF, או שמור אותם לתיקייה ולחץ „רענן”.</div>`;
     return;
   }
   g.innerHTML = entries.map(cardHTML).join('');
@@ -1522,7 +1530,7 @@ function quickLog(m, result, forPlate) {
   renderAll();
   const t = document.createElement('div');
   t.className = 'toast';
-  t.innerHTML = `${result === 'ok' ? 'נרשמה הדפסה מוצלחת' : 'נרשמה הדפסה שנכשלה'}: ${esc(m.name)}${plateNo ? ` · פלטה ${plateNo}` : ''} <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">ביטול</button>`;
+  t.innerHTML = _t`${result === 'ok' ? _t('נרשמה הדפסה מוצלחת') : _t('נרשמה הדפסה שנכשלה')}: ${esc(m.name)}${plateNo ? _t` · פלטה ${plateNo}` : ''} <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">ביטול</button>`;
   $('button', t).onclick = () => { m.prints = m.prints.filter((x) => x.id !== p.id); M.touch(m); renderAll(); t.remove(); };
   $('#toasts').appendChild(t);
   setTimeout(() => t.remove(), 6000);
@@ -1560,12 +1568,12 @@ function onGridClick(e) {
 function renderBulk() {
   const n = S.selected.size;
   if (!n) { $('#bulk').innerHTML = ''; return; }
-  $('#bulk').innerHTML = `<div class="bulkbar"><span class="n">${n} נבחרו</span>
+  $('#bulk').innerHTML = _t`<div class="bulkbar"><span class="n">${n} נבחרו</span>
     <button class="btn small" data-b="tag">${I.tag}הוסף תגית</button>
-    ${n > 1 ? `<button class="btn small" data-b="merge">${I.merge}אחד לגרסאות של מודל אחד</button>` : ''}
+    ${n > 1 ? _t`<button class="btn small" data-b="merge">${I.merge}אחד לגרסאות של מודל אחד</button>` : ''}
     <button class="btn small" data-b="fav">${I.starO}מועדף</button>
     ${native && archiveOn() ? (() => { const ms = [...S.selected].map((i) => lib.data.models[i]).filter(Boolean); const up = ms.filter(hasLocal).length, down = ms.filter((m) => m.versions.some((v) => v.path.startsWith('@gdrive/'))).length;
-      return `${up ? `<button class="btn small primary" data-b="archive">☁ העלה ל-Drive (${up})</button>` : ''}${down ? `<button class="btn small" data-b="restore">החזר מ-Drive (${down})</button>` : ''}`; })() : ''}
+      return `${up ? _t`<button class="btn small primary" data-b="archive">☁ העלה ל-Drive (${up})</button>` : ''}${down ? _t`<button class="btn small" data-b="restore">החזר מ-Drive (${down})</button>` : ''}`; })() : ''}
     <button class="btn small ghost" data-b="clear">${I.close}</button></div>`;
   $('#bulk').onclick = async (e) => {
     const b = e.target.closest('[data-b]');
@@ -1581,8 +1589,8 @@ function renderBulk() {
       if (t) models.forEach((m) => { if (!m.tags.includes(t)) m.tags.push(t); M.touch(m); });
     }
     if (b.dataset.b === 'merge') {
-      const ok = await dialog('לאחד למודל אחד?', `${models.length} המודלים יהפכו לגרסאות של „${esc(models[0].name)}”. הקבצים עצמם לא זזים, ואפשר להפריד אותם שוב בכל רגע.`, [{ label: 'אחד', value: true, primary: true }, { label: 'ביטול', value: false }]);
-      if (ok) { mergeModels(models); S.selected.clear(); toast('אוחדו לגרסאות של מודל אחד'); }
+      const ok = await dialog(_t('לאחד למודל אחד?'), _t`${models.length} המודלים יהפכו לגרסאות של „${esc(models[0].name)}”. הקבצים עצמם לא זזים, ואפשר להפריד אותם שוב בכל רגע.`, [{ label: _t('אחד'), value: true, primary: true }, { label: _t('ביטול'), value: false }]);
+      if (ok) { mergeModels(models); S.selected.clear(); toast(_t('אוחדו לגרסאות של מודל אחד')); }
     }
     renderAll();
   };
@@ -1591,7 +1599,7 @@ function askText(title, placeholder) {
   return new Promise((resolve) => {
     const d = document.createElement('div');
     d.className = 'dialog';
-    d.innerHTML = `<div class="box"><h3>${esc(title)}</h3><input class="inp ltr" placeholder="${esc(placeholder)}"><div class="actions" style="margin-top:14px"><button class="btn primary" data-ok>אישור</button><button class="btn" data-no>ביטול</button></div></div>`;
+    d.innerHTML = _t`<div class="box"><h3>${esc(title)}</h3><input class="inp ltr" placeholder="${esc(placeholder)}"><div class="actions" style="margin-top:14px"><button class="btn primary" data-ok>אישור</button><button class="btn" data-no>ביטול</button></div></div>`;
     const inp = $('input', d);
     const done = (v) => { d.remove(); resolve(v ? v.trim() : null); };
     $('[data-ok]', d).onclick = () => done(inp.value);
@@ -1606,7 +1614,7 @@ function promptTag() {
     const d = document.createElement('div');
     d.className = 'dialog';
     const all = [...new Set(M.list().flatMap((m) => m.tags))];
-    d.innerHTML = `<div class="box"><h3>הוסף תגית</h3><input class="inp" list="taglist" placeholder="למשל: מתנות, כלים, PETG" autofocus><datalist id="taglist">${all.map((t) => `<option value="${esc(t)}">`).join('')}</datalist><div class="actions" style="margin-top:14px"><button class="btn primary" data-ok>הוסף</button><button class="btn" data-no>ביטול</button></div></div>`;
+    d.innerHTML = _t`<div class="box"><h3>הוסף תגית</h3><input class="inp" list="taglist" placeholder="למשל: מתנות, כלים, PETG" autofocus><datalist id="taglist">${all.map((t) => `<option value="${esc(t)}">`).join('')}</datalist><div class="actions" style="margin-top:14px"><button class="btn primary" data-ok>הוסף</button><button class="btn" data-no>ביטול</button></div></div>`;
     const inp = $('input', d);
     const done = (v) => { d.remove(); resolve(v ? v.trim() : null); };
     $('[data-ok]', d).onclick = () => done(inp.value);
@@ -1642,7 +1650,7 @@ function openModal(id) {
   const m = lib.data.models[id];
   S.viewPath = M.cur(m).path;
   const wrap = $('#modal');
-  wrap.innerHTML = `<div class="modal-wrap" id="mw"><div class="modal">
+  wrap.innerHTML = _t`<div class="modal-wrap" id="mw"><div class="modal">
     <div class="stage" id="stage">
       <div class="overlay" id="ov"><div class="spin"></div></div>
       <div class="dims hidden" id="dims"></div>
@@ -1660,7 +1668,7 @@ function openModal(id) {
     $('#stage').prepend(viewer.renderer.domElement);
   } catch (e) {
     viewer = null;
-    $('#ov').innerHTML = 'אין תמיכה בתלת-ממד (WebGL) בדפדפן הזה';
+    $('#ov').innerHTML = _t('אין תמיכה בתלת-ממד (WebGL) בדפדפן הזה');
   }
   $('#wire').onclick = () => viewer && viewer.setWire(!viewer.wire);
   $('#reset').onclick = () => viewer && viewer.resetView();
@@ -1703,9 +1711,9 @@ async function loadView(path) {
   $('#dims').classList.add('hidden');
   try {
     const rec = M.rec(path);
-    if (rec.missing) throw new Error('הקובץ לא נמצא בתיקייה. אולי נמחק או הוזז מחוץ לתיקייה.');
+    if (rec.missing) throw new Error(_t('הקובץ לא נמצא בתיקייה. אולי נמחק או הוזז מחוץ לתיקייה.'));
     const file = await lib.getFile(path);
-    if (file.size > 30e6) ov.innerHTML = `<div class="spin"></div><div class="ov-msg">מעבד מודל גדול (${fmtBytes(file.size)})…</div>`;
+    if (file.size > 30e6) ov.innerHTML = _t`<div class="spin"></div><div class="ov-msg">מעבד מודל גדול (${fmtBytes(file.size)})…</div>`;
     const buf = await file.arrayBuffer();
     if (tok !== loadToken || !viewer) return;
     cancelParses('view');
@@ -1720,13 +1728,13 @@ async function loadView(path) {
       const dims = beds ? viewer.showOnBeds(parts, beds) : viewer.show(parts);
       const tri = parts.reduce((a, p) => a + p.positions.length / 9, 0);
       $('#dims').classList.remove('hidden');
-      $('#dims').innerHTML = `<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(parsed.meta.simplified ? (parsed.meta.triangles * tri) / parsed.meta.simplified : tri).toLocaleString('he-IL')} משולשים${parsed.meta.simplified ? ' · מוצג מפושט' : ''}`;
+      $('#dims').innerHTML = _t`<span class="ltr">${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm</span> · ${Math.round(parsed.meta.simplified ? (parsed.meta.triangles * tri) / parsed.meta.simplified : tri).toLocaleString(loc())} משולשים${parsed.meta.simplified ? _t(' · מוצג מפושט') : ''}`;
       const pe = $('#plates');
       pe.classList.toggle('hidden', plates.length < 2);
       S.viewPlate = id || null;
       const om = lib.data.models[S.open];
       const ps = om ? plateStatus(om) : {};
-      pe.innerHTML = plates.map((p) => `<button class="btn small ${p.id === id ? 'on' : ''}" data-plate="${p.id}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}${ps[p.id] === 'ok' ? ' ✓' : ps[p.id] === 'fail' ? ' ✗' : ''}</button>`).join('') + `<button class="btn small ${!id ? 'on' : ''}" data-plate="0">הכל</button>`;
+      pe.innerHTML = plates.map((p) => _t`<button class="btn small ${p.id === id ? 'on' : ''}" data-plate="${p.id}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}${ps[p.id] === 'ok' ? ' ✓' : ps[p.id] === 'fail' ? ' ✗' : ''}</button>`).join('') + _t`<button class="btn small ${!id ? 'on' : ''}" data-plate="0">הכל</button>`;
       pe.onclick = (e) => { const b = e.target.closest('[data-plate]'); if (b) showPlate(+b.dataset.plate); };
       return dims;
     };
@@ -1740,7 +1748,7 @@ async function loadView(path) {
     if (S.tab === 'details') renderInfo();
   } catch (e) {
     if (tok !== loadToken) return;
-    ov.innerHTML = `<div>${I.cube}<div style="margin-top:8px">לא ניתן להציג את המודל</div><div class="hint">${esc(e.message || e)}</div></div>`;
+    ov.innerHTML = _t`<div>${I.cube}<div style="margin-top:8px">לא ניתן להציג את המודל</div><div class="hint">${esc(tx(e.message || String(e)))}</div></div>`;
   }
 }
 
@@ -1751,7 +1759,7 @@ function renderInfo() {
   const info = $('#info');
   const scrollTop = S.scrollReset ? 0 : $('.info-body', info)?.scrollTop || 0;
   S.scrollReset = false;
-  info.innerHTML = `
+  info.innerHTML = _t`
     <div class="info-head">
       <div class="row">
         <input class="name-input" id="mname" value="${esc(m.name)}" aria-label="שם המודל">
@@ -1772,16 +1780,16 @@ function renderInfo() {
 function settingsKV(p) {
   if (!p) return '';
   const rows = [];
-  if (p.printer) rows.push(['מדפסת', esc(p.printer)]);
-  if (p.filaments && p.filaments.length) rows.push(['פילמנט', p.filaments.map((f) => `<span class="fil">${f.color ? `<span class="swatch" style="background:${esc(f.color)}"></span>` : ''}<span>${esc(f.type)}</span>${f.grams ? `<span class="ltr" style="color:var(--ink3)">${f.grams.toFixed(1)}g</span>` : ''}</span>`).join('')]);
-  if (p.layer) rows.push(['גובה שכבה', `<span class="ltr">${esc(p.layer)} mm</span>`]);
-  if (p.infill) rows.push(['מילוי', `<span class="ltr">${esc(p.infill)}</span>`]);
-  if (p.walls) rows.push(['קירות', esc(p.walls)]);
-  if (p.nozzle || p.bed) rows.push(['טמפרטורות', `<span class="ltr">${p.nozzle ? esc(p.nozzle) + '° nozzle' : ''}${p.nozzle && p.bed ? ' · ' : ''}${p.bed ? esc(p.bed) + '° bed' : ''}</span>`]);
-  if (p.plateType) rows.push(['פלטה', esc(p.plateType)]);
-  rows.push(['תמיכות', p.supports ? 'כן' : 'לא']);
-  if (p.timeSec) rows.push(['זמן משוער', fmtDur(p.timeSec)]);
-  if (p.grams) rows.push(['משקל', `${p.grams.toFixed(1)} g`]);
+  if (p.printer) rows.push([_t('מדפסת'), esc(p.printer)]);
+  if (p.filaments && p.filaments.length) rows.push([_t('פילמנט'), p.filaments.map((f) => `<span class="fil">${f.color ? `<span class="swatch" style="background:${esc(f.color)}"></span>` : ''}<span>${esc(f.type)}</span>${f.grams ? `<span class="ltr" style="color:var(--ink3)">${f.grams.toFixed(1)}g</span>` : ''}</span>`).join('')]);
+  if (p.layer) rows.push([_t('גובה שכבה'), `<span class="ltr">${esc(p.layer)} mm</span>`]);
+  if (p.infill) rows.push([_t('מילוי'), `<span class="ltr">${esc(p.infill)}</span>`]);
+  if (p.walls) rows.push([_t('קירות'), esc(p.walls)]);
+  if (p.nozzle || p.bed) rows.push([_t('טמפרטורות'), `<span class="ltr">${p.nozzle ? esc(p.nozzle) + '° nozzle' : ''}${p.nozzle && p.bed ? ' · ' : ''}${p.bed ? esc(p.bed) + '° bed' : ''}</span>`]);
+  if (p.plateType) rows.push([_t('פלטה'), esc(p.plateType)]);
+  rows.push([_t('תמיכות'), p.supports ? _t('כן') : _t('לא')]);
+  if (p.timeSec) rows.push([_t('זמן משוער'), fmtDur(p.timeSec)]);
+  if (p.grams) rows.push([_t('משקל'), `${p.grams.toFixed(1)} g`]);
   return `<dl class="kv">${rows.map(([k, val]) => `<dt>${k}</dt><dd>${val}</dd>`).join('')}</dl>`;
 }
 
@@ -1789,28 +1797,28 @@ function detailsTab(m) {
   const rec = M.rec(S.viewPath);
   const meta = rec.meta || {};
   const all = [...new Set(M.list().flatMap((x) => x.tags))].filter((t) => !m.tags.includes(t));
-  return `
+  return _t`
     <div class="field"><label>תגיות</label>
-      <div class="tag-editor" id="tagbox">${m.tags.map((t) => tagHTML(t, true)).join('')}<input id="tagin" list="alltags" placeholder="${m.tags.length ? '' : 'הקלד תגית ולחץ Enter'}"><datalist id="alltags">${all.map((t) => `<option value="${esc(t)}">`).join('')}</datalist></div>
+      <div class="tag-editor" id="tagbox">${m.tags.map((t) => tagHTML(t, true)).join('')}<input id="tagin" list="alltags" placeholder="${m.tags.length ? '' : _t('הקלד תגית ולחץ Enter')}"><datalist id="alltags">${all.map((t) => `<option value="${esc(t)}">`).join('')}</datalist></div>
     </div>
     <div class="field"><label>הערות</label><textarea class="notes" id="mnotes" rows="4" placeholder="מאיפה הורדתי, למי הדפסתי, מה לשים לב…">${esc(m.notes)}</textarea></div>
     <div class="section-title">קובץ</div>
     <dl class="kv">
-      <dt>סוג</dt><dd>${fileKind(S.viewPath) === 'stl' ? 'STL' : fileKind(S.viewPath) === 'gcode3mf' ? '3MF פרוס (מוכן להדפסה)' : '3MF'}</dd>
+      <dt>סוג</dt><dd>${fileKind(S.viewPath) === 'stl' ? 'STL' : fileKind(S.viewPath) === 'gcode3mf' ? _t('3MF פרוס (מוכן להדפסה)') : '3MF'}</dd>
       <dt>גודל</dt><dd>${rec.size ? fmtBytes(rec.size) : '–'}</dd>
-      ${rec.dims ? `<dt>מידות</dt><dd class="ltr" style="text-align:right">${rec.dims.x.toFixed(1)} × ${rec.dims.y.toFixed(1)} × ${rec.dims.z.toFixed(1)} mm</dd>` : ''}
+      ${rec.dims ? _t`<dt>מידות</dt><dd class="ltr" style="text-align:right">${rec.dims.x.toFixed(1)} × ${rec.dims.y.toFixed(1)} × ${rec.dims.z.toFixed(1)} mm</dd>` : ''}
       <dt>שונה</dt><dd>${rec.mtime ? fmtDate(rec.mtime) : '–'}</dd>
-      ${meta.designer ? `<dt>מעצב</dt><dd>${esc(meta.designer)}</dd>` : ''}
-      ${meta.license ? `<dt>רישיון</dt><dd>${esc(meta.license)}</dd>` : ''}
+      ${meta.designer ? _t`<dt>מעצב</dt><dd>${esc(meta.designer)}</dd>` : ''}
+      ${meta.license ? _t`<dt>רישיון</dt><dd>${esc(meta.license)}</dd>` : ''}
     </dl>
-    ${meta.description ? `<div class="section-title">תיאור מהקובץ</div><div style="color:var(--ink2);font-size:13px">${esc(meta.description)}</div>` : ''}
-    ${meta.print ? `<div class="section-title">הגדרות הדפסה מהקובץ</div>${settingsKV(meta.print)}` : ''}
+    ${meta.description ? _t`<div class="section-title">תיאור מהקובץ</div><div style="color:var(--ink2);font-size:13px">${esc(meta.description)}</div>` : ''}
+    ${meta.print ? _t`<div class="section-title">הגדרות הדפסה מהקובץ</div>${settingsKV(meta.print)}` : ''}
     <div class="section-title">פעולות</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn small" id="dl">${I.download}הורד עותק</button>
       <button class="btn small" id="logprint">${I.plus}רשום הדפסה</button>
-      ${native && archiveOn() && !isArchived(M.cur(m).path) ? `<button class="btn small" id="toarchive">☁ העבר לארכיון</button>` : ''}
-      ${native && m.versions.some((v) => v.path.startsWith('@gdrive/')) ? `<button class="btn small" id="restore">החזר לתיקייה</button>` : ''}
+      ${native && archiveOn() && !isArchived(M.cur(m).path) ? _t`<button class="btn small" id="toarchive">☁ העבר לארכיון</button>` : ''}
+      ${native && m.versions.some((v) => v.path.startsWith('@gdrive/')) ? _t`<button class="btn small" id="restore">החזר לתיקייה</button>` : ''}
     </div>`;
 }
 
@@ -1821,11 +1829,11 @@ function printsTab(m) {
   const pst = plateStatus(m);
   const sym = { ok: '✓', partial: '◐', fail: '✗' };
   return `
-    ${plates.length > 1 ? `<div class="plate-sum">${plates.map((p) => `<span class="pchip ${pst[p.id] || 'none'}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''} <b>${sym[pst[p.id]] || '–'}</b></span>`).join('')}</div>` : ''}
-    ${S.printForm ? printFormHTML(m) : `<button class="btn primary" id="newprint" style="margin-bottom:14px">${I.plus}רשום הדפסה</button>`}
-    ${list.length ? list.map((p) => `
+    ${plates.length > 1 ? `<div class="plate-sum">${plates.map((p) => _t`<span class="pchip ${pst[p.id] || 'none'}" title="${esc(p.name || '')}">פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''} <b>${sym[pst[p.id]] || '–'}</b></span>`).join('')}</div>` : ''}
+    ${S.printForm ? printFormHTML(m) : _t`<button class="btn primary" id="newprint" style="margin-bottom:14px">${I.plus}רשום הדפסה</button>`}
+    ${list.length ? list.map((p) => _t`
       <div class="print-item">
-        <div class="ph"><span class="pill ${p.result}">${RESULT[p.result]}</span><span class="when">${fmtDate(p.date)}</span>${p.plateNo ? `<span class="badge accent">פלטה ${esc(p.plateNo)}</span>` : ''}${m.versions.length > 1 && p.versionPath ? `<span class="badge">${verName(p.versionPath)}</span>` : ''}${p.source ? `<span class="badge" title="${esc(p.printer || '')}">${p.source === 'cloud' ? 'מהענן' : 'מהמדפסת'}</span>` : ''}
+        <div class="ph"><span class="pill ${p.result}">${RESULT[p.result]}</span><span class="when">${fmtDate(p.date)}</span>${p.plateNo ? _t`<span class="badge accent">פלטה ${esc(p.plateNo)}</span>` : ''}${m.versions.length > 1 && p.versionPath ? `<span class="badge">${verName(p.versionPath)}</span>` : ''}${p.source ? `<span class="badge" title="${esc(p.printer || '')}">${p.source === 'cloud' ? _t('מהענן') : _t('מהמדפסת')}</span>` : ''}
           <span class="x"><button class="btn small ghost" data-editprint="${p.id}">ערוך</button><button class="btn small ghost danger" data-delprint="${p.id}">מחק</button></span></div>
         <div class="meta">
           ${p.material ? `<span>${p.color ? `<span class="swatch" style="background:${esc(p.color)}"></span> ` : ''}${esc(p.material)}</span>` : ''}
@@ -1834,7 +1842,7 @@ function printsTab(m) {
           ${p.minutes ? `<span>${fmtDur(p.minutes * 60)}</span>` : ''}${p.grams ? `<span>${esc(p.grams)} g</span>` : ''}
         </div>
         ${p.notes ? `<div class="pn">${esc(p.notes)}</div>` : ''}
-      </div>`).join('') : (S.printForm ? '' : '<div class="hint">עוד לא נרשמו הדפסות. אחרי כל הדפסה רושמים אם הצליחה, ובפעם הבאה יודעים בדיוק עם אילו הגדרות זה עבד.</div>')}`;
+      </div>`).join('') : (S.printForm ? '' : _t('<div class="hint">עוד לא נרשמו הדפסות. אחרי כל הדפסה רושמים אם הצליחה, ובפעם הבאה יודעים בדיוק עם אילו הגדרות זה עבד.</div>'))}`;
 }
 
 function defaultsFor(m, path, plateNo) {
@@ -1855,12 +1863,12 @@ function printFormHTML(m) {
   const f = S.printForm;
   const verOpts = m.versions.map((v, i) => `<option value="${esc(v.path)}" ${v.path === f.versionPath ? 'selected' : ''}>v${i + 1} · ${esc(baseName(v.path))}</option>`).join('');
   const lastOk = [...m.prints].filter((p) => p.result === 'ok').sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
-  return `<div class="print-form" id="pform">
+  return _t`<div class="print-form" id="pform">
     <div class="field"><label>תוצאה</label><div class="seg" id="pres">${['ok', 'partial', 'fail', 'cancel'].map((r) => `<button data-v="${r}" class="${f.result === r ? 'on' : ''}">${RESULT[r]}</button>`).join('')}</div></div>
     <div class="form-grid">
       <div><label>תאריך</label><input class="inp" type="date" name="date" value="${esc(f.date)}"></div>
-      ${m.versions.length > 1 ? `<div><label>גרסה</label><select class="inp" name="versionPath">${verOpts}</select></div>` : platesOf(m).length > 1 ? '' : '<div></div>'}
-      ${platesOf(m).length > 1 ? `<div><label>פלטה</label><select class="inp" name="plateNo">${platesOf(m).map((p) => `<option value="${p.id}" ${+f.plateNo === p.id ? 'selected' : ''}>פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}</option>`).join('')}</select></div>${m.versions.length > 1 ? '<div></div>' : ''}` : ''}
+      ${m.versions.length > 1 ? _t`<div><label>גרסה</label><select class="inp" name="versionPath">${verOpts}</select></div>` : platesOf(m).length > 1 ? '' : '<div></div>'}
+      ${platesOf(m).length > 1 ? _t`<div><label>פלטה</label><select class="inp" name="plateNo">${platesOf(m).map((p) => _t`<option value="${p.id}" ${+f.plateNo === p.id ? 'selected' : ''}>פלטה ${p.id}${p.name ? ` · ${esc(p.name)}` : ''}</option>`).join('')}</select></div>${m.versions.length > 1 ? '<div></div>' : ''}` : ''}
       <div><label>חומר</label><input class="inp" name="material" value="${esc(f.material || '')}" placeholder="PLA, PETG…"></div>
       <div><label>צבע</label><div style="display:flex;gap:6px"><input type="color" name="color" value="${esc(f.color || '#888888')}" style="width:42px;height:36px;border:1px solid var(--line2);border-radius:8px;background:var(--panel2);padding:2px"><input class="inp" name="colorName" value="${esc(f.colorName || '')}" placeholder="שם הצבע"></div></div>
       <div><label>גובה שכבה (mm)</label><input class="inp ltr" name="layer" value="${esc(f.layer || '')}"></div>
@@ -1873,13 +1881,13 @@ function printFormHTML(m) {
       <div></div>
       <div class="full"><label>הערות</label><textarea class="notes" name="notes" rows="3" placeholder="מה עבד, מה לא, מה לשנות בפעם הבאה">${esc(f.notes || '')}</textarea></div>
     </div>
-    <div class="autofill">${M.rec(f.versionPath).meta?.print ? `<button class="btn small" id="fillfile">מלא מהקובץ</button>` : ''}${lastOk ? `<button class="btn small" id="filllast">העתק מההדפסה המוצלחת האחרונה</button>` : ''}</div>
-    <div class="actions"><button class="btn primary" id="psave">${f.id ? 'שמור שינויים' : 'שמור הדפסה'}</button><button class="btn" id="pcancel">ביטול</button></div>
+    <div class="autofill">${M.rec(f.versionPath).meta?.print ? _t`<button class="btn small" id="fillfile">מלא מהקובץ</button>` : ''}${lastOk ? _t`<button class="btn small" id="filllast">העתק מההדפסה המוצלחת האחרונה</button>` : ''}</div>
+    <div class="actions"><button class="btn primary" id="psave">${f.id ? _t('שמור שינויים') : _t('שמור הדפסה')}</button><button class="btn" id="pcancel">ביטול</button></div>
   </div>`;
 }
 
 function versionsTab(m) {
-  return `
+  return _t`
     <div class="hint">גרסאות הן קבצים שונים של אותו מודל (למשל אחרי תיקון). לחיצה על גרסה מציגה אותה. אפשר גם לגרור קובץ לחלון כדי להוסיף גרסה.</div>
     <label class="btn small" style="margin-bottom:12px">${I.plus}הוסף גרסה חדשה מקובץ<input type="file" id="addver" accept=".stl,.3mf" hidden></label>
     ${[...m.versions].map((v, i) => ({ v, i })).reverse().map(({ v, i }) => {
@@ -1887,16 +1895,16 @@ function versionsTab(m) {
       const rec = M.rec(v.path);
       const prints = m.prints.filter((p) => p.versionPath === v.path);
       const ok = prints.filter((p) => p.result === 'ok').length;
-      return `<div class="ver ${v.path === S.viewPath ? 'viewing' : ''}" data-view="${esc(v.path)}">
+      return _t`<div class="ver ${v.path === S.viewPath ? 'viewing' : ''}" data-view="${esc(v.path)}">
         ${url ? `<img src="${url}" alt="">` : `<div class="vt" data-thumb="${esc(v.path)}"></div>`}
         <div class="vi">
-          <div class="vn">v${i + 1}${v.path === M.cur(m).path ? '<span class="badge accent">נוכחית</span>' : ''}${rec.missing ? '<span class="badge" style="color:var(--fail)">חסר</span>' : ''}${prints.length ? `<span class="badge">${ok}/${prints.length} הצליחו</span>` : ''}</div>
+          <div class="vn">v${i + 1}${v.path === M.cur(m).path ? _t('<span class="badge accent">נוכחית</span>') : ''}${rec.missing ? _t('<span class="badge" style="color:var(--fail)">חסר</span>') : ''}${prints.length ? _t`<span class="badge">${ok}/${prints.length} הצליחו</span>` : ''}</div>
           <div class="vp mono" title="${esc(v.path)}">${esc(dispPath(v.path))} · ${rec.size ? fmtBytes(rec.size) : ''} · ${rec.mtime ? fmtDate(rec.mtime) : ''}</div>
           <input data-vnote="${esc(v.path)}" value="${esc(v.note || '')}" placeholder="מה השתנה בגרסה הזו?">
         </div>
         <div class="va">
-          ${v.path !== M.cur(m).path ? `<button class="btn small" data-setcur="${esc(v.path)}">קבע כנוכחית</button>` : ''}
-          ${m.versions.length > 1 ? `<button class="btn small ghost" data-split="${esc(v.path)}">הפרד</button>` : ''}
+          ${v.path !== M.cur(m).path ? _t`<button class="btn small" data-setcur="${esc(v.path)}">קבע כנוכחית</button>` : ''}
+          ${m.versions.length > 1 ? _t`<button class="btn small ghost" data-split="${esc(v.path)}">הפרד</button>` : ''}
         </div>
       </div>`;
     }).join('')}`;
@@ -1909,7 +1917,7 @@ function bindInfo(m) {
     const tab = t.closest('[data-tab]');
     if (tab) { S.tab = tab.dataset.tab; S.scrollReset = true; renderInfo(); return; }
     if (t.closest('#mfav')) { m.favorite = !m.favorite; M.touch(m); renderInfo(); return; }
-    if (t.closest('#copypath')) { navigator.clipboard?.writeText(lib.root.name + '/' + S.viewPath).then(() => toast('הנתיב הועתק')); return; }
+    if (t.closest('#copypath')) { navigator.clipboard?.writeText(lib.root.name + '/' + S.viewPath).then(() => toast(_t('הנתיב הועתק'))); return; }
     const rm = t.closest('[data-rmtag]');
     if (rm) { m.tags = m.tags.filter((x) => x !== rm.dataset.rmtag); M.touch(m); renderInfo(); return; }
     if (t.closest('#dl')) { downloadFile(S.viewPath); return; }
@@ -1920,7 +1928,7 @@ function bindInfo(m) {
     if (ep) { const p = m.prints.find((x) => x.id === ep.dataset.editprint); S.printForm = { ...p }; S.tab = 'prints'; S.scrollReset = true; renderInfo(); return; }
     const dp = t.closest('[data-delprint]');
     if (dp) {
-      const ok = await dialog('למחוק את רישום ההדפסה?', '', [{ label: 'מחק', value: true, danger: true }, { label: 'ביטול', value: false }]);
+      const ok = await dialog(_t('למחוק את רישום ההדפסה?'), '', [{ label: _t('מחק'), value: true, danger: true }, { label: _t('ביטול'), value: false }]);
       if (ok) { m.prints = m.prints.filter((x) => x.id !== dp.dataset.delprint); M.touch(m); renderInfo(); }
       return;
     }
@@ -1938,7 +1946,7 @@ function bindInfo(m) {
     if (t.closest('#pcancel')) { S.printForm = null; renderInfo(); return; }
     if (t.closest('#psave')) { savePrint(m); return; }
     const sc = t.closest('[data-setcur]');
-    if (sc) { e.stopPropagation(); m.current = sc.dataset.setcur; M.touch(m); renderInfo(); toast('הגרסה הנוכחית עודכנה'); return; }
+    if (sc) { e.stopPropagation(); m.current = sc.dataset.setcur; M.touch(m); renderInfo(); toast(_t('הגרסה הנוכחית עודכנה')); return; }
     const sp = t.closest('[data-split]');
     if (sp) {
       e.stopPropagation();
@@ -2012,11 +2020,11 @@ function savePrint(m) {
   S.printForm = null;
   M.touch(m);
   renderInfo();
-  toast(rec.result === 'ok' ? 'נרשמה הדפסה מוצלחת' : 'ההדפסה נרשמה');
+  toast(rec.result === 'ok' ? _t('נרשמה הדפסה מוצלחת') : _t('ההדפסה נרשמה'));
 }
 
 async function addVersion(m, file) {
-  if (!fileKind(file.name)) { toast('אפשר להוסיף רק STL או 3MF', true); return; }
+  if (!fileKind(file.name)) { toast(_t('אפשר להוסיף רק STL או 3MF'), true); return; }
   const cur = M.cur(m).path;
   const dir = dirName(cur);
   const kindExt = /\.gcode\.3mf$/i.test(file.name) ? '.gcode.3mf' : file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
@@ -2028,11 +2036,11 @@ async function addVersion(m, file) {
     m.versions.push({ path: r.path, added: new Date().toISOString(), note: '' });
     m.current = r.path;
     M.touch(m);
-    toast(`נוספה גרסה v${m.versions.length}: ${baseName(r.path)}`);
+    toast(_t`נוספה גרסה v${m.versions.length}: ${baseName(r.path)}`);
     S.tab = 'versions';
     await rescan(false);
     if (S.open === m.id) { S.viewPath = r.path; renderInfo(); loadView(r.path); }
-  } catch (e) { toast('הוספת הגרסה נכשלה: ' + e.message, true); }
+  } catch (e) { toast(_t('הוספת הגרסה נכשלה: ') + e.message, true); }
 }
 
 function splitVersion(m, path) {
@@ -2045,7 +2053,7 @@ function splitVersion(m, path) {
   m.prints = m.prints.filter((p) => p.versionPath !== path);
   lib.data.models[id] = { id, name: prettyName(baseName(path)), nameAuto: true, tags: [...m.tags], notes: '', favorite: false, current: path, versions: [v], prints: moved, created: now, updated: now };
   M.touch(m);
-  toast('הגרסה הופרדה למודל נפרד');
+  toast(_t('הגרסה הופרדה למודל נפרד'));
   if (S.viewPath === path) loadView(M.cur(m).path);
   renderInfo();
 }
@@ -2059,7 +2067,7 @@ async function downloadFile(path) {
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-  } catch (e) { toast('ההורדה נכשלה: ' + e.message, true); }
+  } catch (e) { toast(_t('ההורדה נכשלה: ') + e.message, true); }
 }
 
 /* ================= go ================= */

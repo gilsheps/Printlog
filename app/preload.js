@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('shelfNative', {
+  lang: ipcRenderer.sendSync('app:lang'),
   fs: {
     list: (rel) => ipcRenderer.invoke('fs:list', rel),
     stat: (rel) => ipcRenderer.invoke('fs:stat', rel),

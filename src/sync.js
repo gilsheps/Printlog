@@ -1,3 +1,4 @@
+import { _t } from './i18n.js';
 // Import of prints recorded by the Shelf Sync helper (.shelf/printer-sync.json)
 import { uid, baseName } from './store.js';
 
@@ -122,8 +123,8 @@ export function entryToPrint(lib, m, e) {
   const r = entryResult(e);
   const result = r === 'ok' || r === 'cancel' || r === 'fail' ? r : 'partial';
   const notes = [];
-  if (r === 'unknown') notes.push(`סטטוס לא ידוע מהענן (${e.rawStatus})`);
-  if (e.error) notes.push(`קוד שגיאה מהמדפסת: ${e.error}`);
+  if (r === 'unknown') notes.push(_t`סטטוס לא ידוע מהענן (${e.rawStatus})`);
+  if (e.error) notes.push(_t`קוד שגיאה מהמדפסת: ${e.error}`);
   // which version was current at print time
   const t = Date.parse(e.start || '') || Date.now();
   let versionPath = m.current || m.versions[m.versions.length - 1].path;

@@ -4,13 +4,16 @@ const path = require('path');
 const fs = require('fs');
 const { Engine, discover } = require('./engine');
 const { GDrive } = require('./gdrive');
+const { _t, setLang, getLang } = require('./i18n');
 
 // Internal name stays 'Model Shelf' on purpose: settings and the encrypted Bambu sign-in are
 // stored under it, so renaming the app (now PrintLog) keeps them. Shown name comes from productName.
 app.setName('Model Shelf');
+if (process.env.PRINTLOG_TEST_USERDATA) app.setPath('userData', process.env.PRINTLOG_TEST_USERDATA); // tests: a throwaway profile
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
+const HAD_CFG = fs.existsSync(CFG_FILE); // existing users keep Hebrew; a new install follows the system language
 let win = null, tray = null, quitting = false, engine = null, lastSync = null;
 
 /* ---------------- config (token encrypted with the OS keychain when possible) */
@@ -74,11 +77,11 @@ ipcMain.handle('fs:write', async (_e, rel, data) => {
 ipcMain.handle('fs:mkdir', async (_e, rel) => { await fs.promises.mkdir(resolveRel(rel), { recursive: true }); });
 const inside = (a, b) => a === b || a.startsWith(b + path.sep);
 ipcMain.handle('archive:pick', async () => {
-  const r = await dialog.showOpenDialog(win, { title: 'בחר תיקיית ארכיון (מומלץ: בתוך Google Drive)', properties: ['openDirectory', 'createDirectory'] });
+  const r = await dialog.showOpenDialog(win, { title: _t('בחר תיקיית ארכיון (מומלץ: בתוך Google Drive)'), properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return null;
   const dir = path.resolve(r.filePaths[0]);
   const c = cfg();
-  if (c.library && (inside(dir, c.library) || inside(c.library, dir))) return { error: 'תיקיית הארכיון לא יכולה להיות בתוך תיקיית המודלים (או להכיל אותה)' };
+  if (c.library && (inside(dir, c.library) || inside(c.library, dir))) return { error: _t('תיקיית הארכיון לא יכולה להיות בתוך תיקיית המודלים (או להכיל אותה)') };
   c.options.archiveDir = dir;
   saveCfg(c);
   return { path: dir };
@@ -86,7 +89,7 @@ ipcMain.handle('archive:pick', async () => {
 ipcMain.handle('archive:clear', () => { const c = cfg(); delete c.options.archiveDir; saveCfg(c); return true; });
 // move a file from the models folder into the archive, keeping its sub-folder
 ipcMain.handle('archive:move', async (_e, rel) => {
-  if (!cfg().options.archiveDir) throw new Error('לא נבחרה תיקיית ארכיון');
+  if (!cfg().options.archiveDir) throw new Error(_t('לא נבחרה תיקיית ארכיון'));
   if (String(rel).startsWith('@archive')) return rel;
   const src = resolveRel(rel);
   const dst = resolveRel('@archive/' + rel);
@@ -98,7 +101,7 @@ ipcMain.handle('archive:move', async (_e, rel) => {
     if (e.code !== 'EXDEV') throw e;
     await fs.promises.copyFile(src, target);
     const a = await fs.promises.stat(src), b = await fs.promises.stat(target);
-    if (a.size !== b.size) throw new Error('ההעתקה לארכיון לא הושלמה');
+    if (a.size !== b.size) throw new Error(_t('ההעתקה לארכיון לא הושלמה'));
     await fs.promises.unlink(src);
   }
   return '@archive/' + path.relative(cfg().options.archiveDir, target).split(path.sep).join('/');
@@ -126,7 +129,7 @@ ipcMain.handle('lib:useCloud', () => {
   return libInfo(c);
 });
 ipcMain.handle('lib:pick', async () => {
-  const r = await dialog.showOpenDialog(win, { title: 'בחר את תיקיית המודלים', properties: ['openDirectory', 'createDirectory'] });
+  const r = await dialog.showOpenDialog(win, { title: _t('בחר את תיקיית המודלים'), properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return null;
   const c = cfg();
   const dest = path.resolve(r.filePaths[0]);
@@ -183,7 +186,7 @@ async function gdriveRead(rel) {
 ipcMain.handle('gdrive:status', () => ({ available: gdrive.available(), connected: gdrive.connected(), email: cfg().gdrive?.email || '' }));
 ipcMain.handle('gdrive:connect', async () => {
   try { const r = await gdrive.connect(); win && win.focus(); return { ok: true, email: r.email }; }
-  catch (e) { return { ok: false, error: e.message === 'missing-client' ? 'בגרסה הזו חסר מפתח Google (OAuth client).' : e.message }; }
+  catch (e) { return { ok: false, error: e.message === 'missing-client' ? _t('בגרסה הזו חסר מפתח Google (OAuth client).') : e.message }; }
 });
 ipcMain.handle('gdrive:disconnect', () => { gdrive.disconnect(); return true; });
 // upload to Drive, verify, then remove the local file
@@ -211,13 +214,15 @@ ipcMain.handle('gdrive:restore', async (_e, gpath, destRel) => {
 const publicState = () => {
   const c = cfg();
   return {
-    version: app.getVersion(), platform: process.platform, library: c.library || '', libraryInternal: !!c.libraryInternal, mode: c.mode, archiveDir: c.options.archiveDir || '',
+    version: app.getVersion(), platform: process.platform, lang: getLang(), library: c.library || '', libraryInternal: !!c.libraryInternal, mode: c.mode, archiveDir: c.options.archiveDir || '',
     cloud: c.cloud ? { email: c.cloud.email, region: c.cloud.region, loggedIn: !!c.cloud.token } : null,
     printers: c.printers.map((p) => ({ serial: p.serial, name: p.name, model: p.model, ip: p.ip || '', access_code: p.access_code || '' })),
     options: { ...c.options, closeToTray: !!c.options.closeToTray },
   };
 };
 ipcMain.handle('sync:state', () => publicState());
+// the window needs the language before its first line of script runs (sync on purpose)
+ipcMain.on('app:lang', (e) => { e.returnValue = getLang(); });
 ipcMain.handle('sync:setConfig', (_e, patch) => {
   const c = cfg();
   if (patch.mode) c.mode = patch.mode;
@@ -227,6 +232,7 @@ ipcMain.handle('sync:setConfig', (_e, patch) => {
   }
   if (patch.options) c.options = { ...c.options, ...patch.options };
   saveCfg(c);
+  if (patch.options && patch.options.lang && patch.options.lang !== getLang()) { setLang(patch.options.lang); setAppMenu(); }
   applyLogin();
   engine.start();
   updateTray();
@@ -298,11 +304,11 @@ ipcMain.handle('app:checkUpdate', async () => {
 // download the new version from the GitHub release and install it
 ipcMain.handle('app:installUpdate', async (_e, url) => {
   try {
-    if (!/^https:\/\/github\.com\/gilsheps\/(Printlog|printlog|gilsheps-printlog-releases|model-shelf)\/releases\/download\//.test(url)) throw new Error('כתובת עדכון לא מוכרת');
+    if (!/^https:\/\/github\.com\/gilsheps\/(Printlog|printlog|gilsheps-printlog-releases|model-shelf)\/releases\/download\//.test(url)) throw new Error(_t('כתובת עדכון לא מוכרת'));
     const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'printlog-update-'));
     const file = path.join(dir, decodeURIComponent(url.split('/').pop()));
     const r = await fetch(url, { headers: { 'User-Agent': 'PrintLog' }, signal: AbortSignal.timeout(15 * 60 * 1000) });
-    if (!r.ok || !r.body) throw new Error(`ההורדה נכשלה (HTTP ${r.status})`);
+    if (!r.ok || !r.body) throw new Error(_t`ההורדה נכשלה (HTTP ${r.status})`);
     const total = +r.headers.get('content-length') || 0;
     const out = fs.createWriteStream(file);
     let got = 0, last = 0;
@@ -312,14 +318,14 @@ ipcMain.handle('app:installUpdate', async (_e, url) => {
       if (Date.now() - last > 250) { last = Date.now(); win && win.webContents.send('update-progress', total ? got / total : null); }
     }
     await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));
-    if (total && got !== total) throw new Error('ההורדה לא הושלמה');
+    if (total && got !== total) throw new Error(_t('ההורדה לא הושלמה'));
     const { spawn, execFileSync } = require('child_process');
     if (process.platform === 'win32') {
       // NSIS installer: silent, same folder as now, start the app again when done
       spawn(file, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
     } else if (process.platform === 'darwin') {
       const appPath = path.resolve(app.getPath('exe'), '../../..'); // …/PrintLog.app
-      if (!appPath.endsWith('.app')) throw new Error('לא מצאנו את מיקום האפליקציה');
+      if (!appPath.endsWith('.app')) throw new Error(_t('לא מצאנו את מיקום האפליקציה'));
       // copy the .app out of the mounted dmg, then detach it
       const ex = path.join(dir, 'x'), mnt = path.join(dir, 'mnt');
       execFileSync('/usr/bin/hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mnt, file]);
@@ -328,7 +334,7 @@ ipcMain.handle('app:installUpdate', async (_e, url) => {
         name = fs.readdirSync(mnt).find((n) => n.endsWith('.app'));
         if (name) execFileSync('/usr/bin/ditto', [path.join(mnt, name), path.join(ex, name)]);
       } finally { try { execFileSync('/usr/bin/hdiutil', ['detach', mnt, '-force']); } catch { } }
-      if (!name) throw new Error('קובץ העדכון לא תקין');
+      if (!name) throw new Error(_t('קובץ העדכון לא תקין'));
       const next = path.join(ex, name);
       try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', next]); } catch { }
       fs.accessSync(path.dirname(appPath), fs.constants.W_OK);
@@ -339,11 +345,11 @@ rm -rf "$1.old" && mv "$1" "$1.old" && /usr/bin/ditto "$2" "$1" && rm -rf "$1.ol
 open "$1"
 `, { mode: 0o755 });
       spawn('/bin/sh', [sh, appPath, next], { detached: true, stdio: 'ignore' }).unref();
-    } else throw new Error('עדכון אוטומטי לא נתמך במערכת הזו');
+    } else throw new Error(_t('עדכון אוטומטי לא נתמך במערכת הזו'));
     quitting = true;
     setTimeout(() => app.quit(), 300);
     return { ok: true };
-  } catch (e) { return { ok: false, error: e.code === 'EACCES' ? 'אין הרשאה להחליף את האפליקציה בתיקייה הזו' : e.message }; }
+  } catch (e) { return { ok: false, error: e.code === 'EACCES' ? _t('אין הרשאה להחליף את האפליקציה בתיקייה הזו') : e.message }; }
 });
 ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/(github\.com|e\.bambulab\.com)\//.test(url)) shell.openExternal(url); });
 
@@ -367,7 +373,7 @@ function createWindow(show = true) {
     win.hide();
     if (process.platform === 'darwin') app.dock?.hide();
     if (!c.options.closeHintShown && Notification.isSupported()) {
-      new Notification({ title: 'PrintLog ממשיך לרוץ ברקע', body: process.platform === 'darwin' ? 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: ⌘Q, או מהאייקון בשורת התפריטים ← יציאה.' : 'כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: האייקון במגש ← יציאה.' }).show();
+      new Notification({ title: _t('PrintLog ממשיך לרוץ ברקע'), body: process.platform === 'darwin' ? _t('כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: ⌘Q, או מהאייקון בשורת התפריטים ← יציאה.') : _t('כדי לרשום הדפסות גם כשהחלון סגור. ליציאה: האייקון במגש ← יציאה.') }).show();
       c.options.closeHintShown = true;
       saveCfg(c);
     }
@@ -386,7 +392,7 @@ function printerSummary() {
     const d = JSON.parse(fs.readFileSync(path.join(cfg().library, '.shelf', 'printer-sync.json'), 'utf8'));
     const p = Object.values(d.printers || {})[0];
     if (!p) return '';
-    const st = { running: 'מדפיס', prepare: 'מתכונן', pause: 'מושהה', finish: 'סיים', failed: 'נכשל', idle: 'פנוי', offline: 'לא מחובר' }[p.state] || p.state || '';
+    const st = { running: _t('מדפיס'), prepare: _t('מתכונן'), pause: _t('מושהה'), finish: _t('סיים'), failed: _t('נכשל'), idle: _t('פנוי'), offline: _t('לא מחובר') }[p.state] || p.state || '';
     return `${p.name}: ${st}${p.state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${p.job && ['running', 'pause', 'prepare'].includes(p.state) ? ` · ${p.job}` : ''}`;
   } catch { return ''; }
 }
@@ -395,16 +401,16 @@ function updateTray() {
   const s = printerSummary();
   tray.setToolTip(s ? `PrintLog · ${s}` : 'PrintLog');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'פתח את PrintLog', click: showWindow },
+    { label: _t('פתח את PrintLog'), click: showWindow },
     ...(s ? [{ label: s, enabled: false }] : []),
     { type: 'separator' },
-    { label: 'סנכרן עכשיו', enabled: cfg().mode === 'cloud' || cfg().mode === 'both', click: () => engine.loopHistory(false) },
-    { label: 'יציאה', click: () => { quitting = true; app.quit(); } },
+    { label: _t('סנכרן עכשיו'), enabled: cfg().mode === 'cloud' || cfg().mode === 'both', click: () => engine.loopHistory(false) },
+    { label: _t('יציאה'), click: () => { quitting = true; app.quit(); } },
   ]));
 }
 function notify(e) {
   if (!Notification.isSupported()) return;
-  const n = new Notification({ title: e.result === 'ok' ? 'ההדפסה הסתיימה' : e.result === 'cancel' ? 'ההדפסה בוטלה' : 'ההדפסה נכשלה', body: `${e.title || 'הדפסה'}${e.printer ? ' · ' + e.printer : ''}`, silent: false });
+  const n = new Notification({ title: e.result === 'ok' ? _t('ההדפסה הסתיימה') : e.result === 'cancel' ? _t('ההדפסה בוטלה') : _t('ההדפסה נכשלה'), body: `${e.title || _t('הדפסה')}${e.printer ? ' · ' + e.printer : ''}`, silent: false });
   n.on('click', showWindow);
   n.show();
 }
@@ -425,14 +431,20 @@ app.on('activate', showWindow);
 app.on('before-quit', () => { quitting = true; engine && engine.stop(); });
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 
+function setAppMenu() {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'PrintLog', submenu: [{ role: 'about', label: _t('אודות PrintLog') }, { type: 'separator' }, { label: _t('הגדרות…'), accelerator: 'CmdOrCtrl+,', click: () => { showWindow(); win.webContents.send('open-settings'); } }, { type: 'separator' }, { role: 'hide', label: _t('הסתר את PrintLog') }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit', label: _t('צא מ-PrintLog') }] },
+    { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+  ]));
+}
+
 app.whenReady().then(() => {
-  if (process.platform === 'darwin') {
-    Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: 'PrintLog', submenu: [{ role: 'about', label: 'אודות PrintLog' }, { type: 'separator' }, { label: 'הגדרות…', accelerator: 'CmdOrCtrl+,', click: () => { showWindow(); win.webContents.send('open-settings'); } }, { type: 'separator' }, { role: 'hide', label: 'הסתר את PrintLog' }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit', label: 'צא מ-PrintLog' }] },
-      { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
-    ]));
-    app.setAboutPanelOptions({ applicationName: 'PrintLog', applicationVersion: app.getVersion() });
-  }
+  const c0 = cfg();
+  if (!c0.options.lang) { c0.options.lang = HAD_CFG || /^he\b/i.test(app.getLocale()) ? 'he' : 'en'; saveCfg(c0); }
+  setLang(c0.options.lang);
+  setAppMenu();
+  if (process.platform === 'darwin') app.setAboutPanelOptions({ applicationName: 'PrintLog', applicationVersion: app.getVersion() });
   engine = new Engine({
     getConfig: () => cfg(),
     saveConfig: saveCfg,

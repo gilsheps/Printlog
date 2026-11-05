@@ -134,10 +134,11 @@ button{cursor:pointer}
 #app{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:240px minmax(0,1fr)}
 header.top{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 .search{flex:1;max-width:520px;position:relative}
-.search input{width:100%;border:1px solid var(--line2);background:var(--panel2);border-radius:10px;padding:8px 36px 8px 12px;outline:none}
+.search input{width:100%;border:1px solid var(--line2);background:var(--panel2);border-radius:10px;padding-block:8px;padding-inline:36px 34px;outline:none}
 .search input:focus{border-color:var(--accent);background:var(--panel)}
-.search svg{position:absolute;right:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--ink3)}
-.search kbd{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);border:1px solid var(--line2);border-radius:5px;padding:0 5px}
+.search svg{position:absolute;inset-inline-start:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--ink3)}
+[dir=ltr] .nav [data-step] svg{transform:scaleX(-1)}
+.search kbd{position:absolute;inset-inline-end:9px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);border:1px solid var(--line2);border-radius:5px;padding:0 5px}
 .top .spacer{flex:1}
 .folder-chip{display:inline-flex;align-items:center;gap:6px;color:var(--ink2);font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .folder-chip svg{width:15px;height:15px;flex:none}
