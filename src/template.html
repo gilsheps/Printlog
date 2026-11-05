@@ -71,6 +71,50 @@ button{cursor:pointer}
 .welcome-card h1{font-size:34px;line-height:1.15;margin:26px 0 12px;letter-spacing:-.02em}
 .welcome-card p{color:var(--ink2);font-size:16px;margin:0 0 26px}
 .welcome-actions{display:flex;flex-direction:column;gap:10px;align-items:center}
+/* welcome, desktop app: a printer at work on one side, signing in on the other */
+#welcome.w2{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,1fr);padding:0;place-items:stretch}
+.w2-art{position:relative;overflow:hidden;background:radial-gradient(120% 90% at 50% 100%,color-mix(in srgb,var(--accent) 22%,var(--panel)) 0%,var(--panel) 60%);border-inline-end:1px solid var(--line);display:grid;place-items:center;min-height:100%}
+.w2-glow{position:absolute;width:60%;aspect-ratio:1;border-radius:50%;background:var(--accent);filter:blur(90px);opacity:.18;bottom:8%;animation:w2pulse 6s ease-in-out infinite}
+@keyframes w2pulse{50%{opacity:.3;transform:scale(1.08)}}
+.w2-printer{position:relative;width:min(360px,70%);aspect-ratio:1;transform:perspective(900px) rotateX(18deg)}
+.w2-bed{position:absolute;inset:auto 0 12% 0;height:16px;border-radius:6px;background:linear-gradient(180deg,color-mix(in srgb,var(--ink) 30%,var(--panel)),color-mix(in srgb,var(--ink) 55%,var(--panel)));box-shadow:0 18px 40px rgba(0,0,0,.25)}
+.w2-model{position:absolute;left:50%;bottom:calc(12% + 16px);width:46%;transform:translateX(-50%);display:flex;flex-direction:column-reverse}
+.w2-model i{display:block;height:12px;margin-inline:calc(var(--i) * 1.2%);border-radius:3px;background:linear-gradient(90deg,#ff7a2a,#ff9d4d 45%,#e85d0c);box-shadow:inset 0 -2px 0 rgba(0,0,0,.18);opacity:0;transform:scaleX(.6);animation:w2layer 9s linear infinite;animation-delay:calc(var(--i) * .5s)}
+@keyframes w2layer{0%{opacity:0;transform:scaleX(.6)}4%{opacity:1;transform:scaleX(1)}88%{opacity:1;transform:scaleX(1)}96%,100%{opacity:0;transform:scaleX(1)}}
+.w2-gantry{position:absolute;left:4%;right:4%;top:10%;height:8px;border-radius:4px;background:color-mix(in srgb,var(--ink) 40%,var(--panel));animation:w2rise 9s linear infinite}
+@keyframes w2rise{0%{top:72%}88%{top:20%}100%{top:72%}}
+.w2-head{position:absolute;top:-14px;width:36px;height:30px;border-radius:7px;background:var(--ink);box-shadow:0 6px 14px rgba(0,0,0,.25);animation:w2move 1.1s ease-in-out infinite alternate}
+.w2-head::after{content:'';position:absolute;left:50%;bottom:-8px;width:8px;height:9px;transform:translateX(-50%);border-radius:0 0 3px 3px;background:var(--accent)}
+@keyframes w2move{from{left:26%}to{left:calc(74% - 36px)}}
+.w2-chip{position:absolute;display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:12px;background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:blur(8px);border:1px solid var(--line2);font-size:13px;color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.12);animation:w2float 7s ease-in-out infinite}
+.w2-chip .swatch{width:12px;height:12px;border-radius:4px}
+.w2-chip.c1{top:16%;inset-inline-start:10%}
+.w2-chip.c2{top:34%;inset-inline-end:8%;animation-delay:-2.3s}
+.w2-chip.c3{bottom:14%;inset-inline-start:14%;animation-delay:-4.6s}
+@keyframes w2float{50%{transform:translateY(-8px)}}
+.w2-panel{display:flex;flex-direction:column;justify-content:center;gap:0;padding:28px clamp(28px,5vw,72px);max-width:520px;width:100%;margin-inline:auto}
+.w2-panel h1{font-size:34px;line-height:1.12;letter-spacing:-.02em;margin:28px 0 10px}
+.w2-panel h1 em{font-style:normal;color:var(--accent)}
+.w2-panel p{color:var(--ink2);font-size:15px;line-height:1.55;margin:0 0 24px}
+.w2-form{display:flex;flex-direction:column;gap:6px}
+.w2-lbl{font-size:12.5px;color:var(--ink2);margin-top:6px}
+.w2-inp{font-size:15px;padding:11px 12px}
+.w2-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px;flex-wrap:wrap}
+.w2-row .w2-region{width:auto;flex:none;font-size:12.5px;padding:5px 8px}
+.w2-link{background:none;border:0;padding:4px 0;color:var(--accent);font:inherit;font-size:13px;cursor:pointer;text-align:start}
+.w2-link:hover{text-decoration:underline}
+.w2-go{margin-top:12px;justify-content:center;font-size:15px;padding:12px 18px}
+.w2-go svg{width:18px;height:18px}
+.w2-err{min-height:18px;font-size:13px;color:var(--fail);margin-top:6px}
+.w2-note{font-size:12px;color:var(--ink3)}
+.w2-or{display:flex;align-items:center;gap:10px;margin:20px 0 14px;color:var(--ink3);font-size:12px}
+.w2-or::before,.w2-or::after{content:'';flex:1;height:1px;background:var(--line2)}
+.w2-alt{justify-content:center;padding:11px 16px}
+.w2-foot{display:flex;gap:4px;margin-top:26px}
+.w2-lang{background:none;border:1px solid transparent;border-radius:8px;padding:4px 10px;font:inherit;font-size:12.5px;color:var(--ink3);cursor:pointer}
+.w2-lang.on{border-color:var(--line2);color:var(--ink)}
+@media (max-width:860px){#welcome.w2{grid-template-columns:1fr}.w2-art{min-height:260px;border-inline-end:0;border-bottom:1px solid var(--line)}.w2-printer{width:min(240px,60%)}}
+@media (prefers-reduced-motion:reduce){.w2-art *,.w2-art{animation:none!important}.w2-model i{opacity:1;transform:none}}
 #settings{position:relative}
 .dialog .box.printer-screen{width:min(980px,100%);max-height:calc(100vh - 40px);display:flex;flex-direction:column;padding:0;overflow:hidden}
 .ps-head{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}

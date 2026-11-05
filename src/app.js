@@ -158,6 +158,7 @@ async function boot() {
       return openLibrary(new NativeDirHandle('', info.name));
     }
   }
+  if (native) return welcomeApp(root);
   const supported = !!native || 'showDirectoryPicker' in window;
   const saved = !native && supported ? await kvGet('root') : null;
   root.innerHTML = _t`
@@ -204,6 +205,103 @@ async function boot() {
       else toast(_t('צריך לאשר גישה לתיקייה כדי להמשיך'), true);
     } catch (e) { pick(); }
   });
+}
+
+/* first run in the desktop app: signing in to Bambu is the main path, right on this screen;
+   a folder of models (or no account at all) is the quieter second choice */
+function welcomeApp(root) {
+  const art = `<div class="w2-art" aria-hidden="true">
+      <div class="w2-glow"></div>
+      <div class="w2-printer">
+        <div class="w2-gantry"><div class="w2-head"></div></div>
+        <div class="w2-model">${Array.from({ length: 14 }, (_, i) => `<i style="--i:${i}"></i>`).join('')}</div>
+        <div class="w2-bed"></div>
+      </div>
+      <div class="w2-chip c1"><span class="sdot ok"></span>Benchy · ${_t('הצליחה')}</div>
+      <div class="w2-chip c2">${_t('שכבה')} <b class="ltr">142/180</b></div>
+      <div class="w2-chip c3"><span class="swatch" style="background:#ff6a13"></span>PLA · <span class="ltr">12 g</span></div>
+    </div>`;
+  const form = (step) => step === 'code' || step === 'tfa' ? _t`
+      <label class="w2-lbl" for="wcode">${step === 'tfa' ? _t('קוד מאפליקציית האימות') : _t('קוד שנשלח למייל')}</label>
+      <input class="inp ltr w2-inp" id="wcode" inputmode="numeric" autocomplete="one-time-code">
+      <button class="btn primary w2-go" data-wverify>אמת והמשך</button>
+      <button class="w2-link" data-wback>חזרה</button>` : _t`
+      <label class="w2-lbl" for="wemail">מייל של חשבון Bambu</label>
+      <input class="inp ltr w2-inp" id="wemail" autocomplete="username" placeholder="name@example.com">
+      <label class="w2-lbl" for="wpass">סיסמה</label>
+      <input class="inp ltr w2-inp" id="wpass" type="password" autocomplete="current-password">
+      <div class="w2-row"><select class="inp w2-region" id="wregion" aria-label="אזור"><option value="global">bambulab.com</option><option value="china">bambulab.cn</option></select>
+      <button class="w2-link" data-wcode>אין סיסמה? שלח לי קוד למייל</button></div>
+      <button class="btn primary w2-go" data-wlogin>${I.cloud}התחבר ל-Bambu</button>`;
+  let step = 'login', email = '';
+  const draw = () => {
+    root.innerHTML = _t`<section id="welcome" class="w2">
+    ${art}
+    <div class="w2-panel">
+      <div class="logo"><span class="logo-mark">${I.mark}</span>PrintLog</div>
+      <h1>כל הדפסה שלך, <em>במקום אחד.</em></h1>
+      <p>מתחברים פעם אחת לחשבון Bambu, וכל היסטוריית ההדפסות מופיעה כאן: בתלת-ממד, עם תגיות, הערות והתראות בזמן אמת.</p>
+      <div class="w2-form">${form(step)}<div class="w2-err" id="werr"></div></div>
+      <div class="w2-note">הסיסמה לא נשמרת. ההתחברות נעשית ישירות מול Bambu.</div>
+      <div class="w2-or"><span>או</span></div>
+      <button class="btn w2-alt" id="pick">${I.folder}יש לי תיקיית מודלים (STL / 3MF)</button>
+      <div class="w2-foot">${[['he', 'עברית'], ['en', 'English']].map(([k, l]) => `<button class="w2-lang ${getLang() === k ? 'on' : ''}" data-wlang="${k}">${l}</button>`).join('')}</div>
+    </div>
+  </section>`;
+    if (email && $('#wemail')) $('#wemail').value = email;
+    const f = $('#wcode') || $('#wemail');
+    if (f) f.focus();
+  };
+  const err = (m) => { const e = $('#werr'); if (e) e.textContent = m ? tx(m) : ''; };
+  const busy = (b, on, label) => { if (!b) return; b.disabled = on; if (label) b.innerHTML = label; };
+  // signed in: show everything from the cloud, no folder needed (a folder can be chosen later in Settings)
+  const leave = () => { root.onclick = null; root.onkeydown = null; };
+  const done = async () => {
+    leave();
+    const info = await native.useCloud();
+    S.internalLib = true;
+    await openLibrary(new NativeDirHandle('', info.name));
+    toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…'));
+  };
+  const handle = async (r) => {
+    if (r && r.ok) return done();
+    if (r && r.need) { step = r.need; draw(); if (r.need === 'code') toast(_t('שלחנו קוד למייל שלך')); return; }
+    err((r && r.error) || _t('ההתחברות נכשלה'));
+  };
+  root.onclick = async (e) => {
+    const t = e.target;
+    if (t.closest('#pick')) { const info = await native.pickFolder(); if (info) { leave(); openLibrary(new NativeDirHandle('', info.name)); } return; }
+    const lg = t.closest('[data-wlang]');
+    if (lg) { if (lg.dataset.wlang !== getLang()) { await native.sync.setConfig({ options: { lang: lg.dataset.wlang } }); location.reload(); } return; }
+    if (t.closest('[data-wback]')) { step = 'login'; draw(); return; }
+    const b = t.closest('[data-wlogin],[data-wcode],[data-wverify]');
+    if (!b) return;
+    err('');
+    if (b.matches('[data-wverify]')) {
+      const code = $('#wcode').value.trim();
+      if (!code) { err(_t('צריך למלא את הקוד')); return; }
+      busy(b, true, _t('מתחבר…'));
+      const r = await native.sync.verify({ step, code });
+      busy(b, false, _t('אמת והמשך'));
+      return handle(r);
+    }
+    email = $('#wemail').value.trim();
+    if (!email) { err(_t('צריך למלא מייל')); $('#wemail').focus(); return; }
+    const codeOnly = b.matches('[data-wcode]');
+    const pass = $('#wpass').value;
+    if (!codeOnly && !pass) { err(_t('צריך למלא סיסמה, או לבקש קוד למייל')); $('#wpass').focus(); return; }
+    const label = b.innerHTML;
+    busy(b, true, codeOnly ? _t('שולח…') : _t('מתחבר…'));
+    const r = await native.sync.login({ email, password: codeOnly ? '' : pass, region: $('#wregion').value, codeOnly });
+    if ($('#welcome')) busy(b, false, label);
+    handle(r);
+  };
+  root.onkeydown = (e) => {
+    if (e.key !== 'Enter' || !e.target.closest('.w2-inp')) return;
+    const b = $('[data-wverify]') || $('[data-wlogin]');
+    if (b) b.click();
+  };
+  draw();
 }
 
 async function openLibrary(dir) {
