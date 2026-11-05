@@ -5,6 +5,7 @@
   "main": "app/main.js",
   "scripts": {
     "build": "node build.mjs",
+    "check": "node build.mjs && node test/unit/run.js",
     "app:prepare": "node build.mjs && node -e \"const fs=require('fs');fs.mkdirSync('app/renderer',{recursive:true});fs.copyFileSync('dist/shelf.html','app/renderer/index.html')\"",
     "start": "npm run app:prepare && electron .",
     "dist": "npm run app:prepare && electron-builder",
@@ -14,6 +15,8 @@
   "author": "Gil Sheps",
   "license": "MIT",
   "devDependencies": {
+    "acorn": "8.11.3",
+    "acorn-walk": "8.3.2",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",

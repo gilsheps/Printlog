@@ -425,11 +425,13 @@ class MiniMQTT {
 // accept(serial): whether this connection currently speaks for that printer (status + reports);
 // onState(up) runs before accept is asked, so a LAN link can hand a printer over to the cloud when it drops
 function startMqtt({ host, port = 8883, user, password, serials, watchers, insecure, label, out, log, accept = () => true, onState }) {
+  let fails = 0, connectedOnce = false;
   return new MiniMQTT({
     host, port, user, password, insecure,
     onConnect: (c, rc) => {
       if (onState) onState(rc === 0);
       if (rc === 0) {
+        connectedOnce = true;
         log(`${label}: connected`);
         serials.forEach((s, i) => {
           c.subscribe(`device/${s}/report`, i + 1);
@@ -445,7 +447,12 @@ function startMqtt({ host, port = 8883, user, password, serials, watchers, insec
     onDown: (e) => {
       if (onState) onState(false);
       log(`${label}: disconnected (${e.message})`);
-      serials.filter(accept).forEach((s) => out.setPrinter(s, { conn: 'offline' }, false));
+      // never got through, time after time: say why instead of a plain "offline"
+      // (networks that block outgoing port 8883 look exactly like this)
+      fails = connectedOnce ? 0 : fails + 1;
+      const unreachable = !connectedOnce && fails >= 3;
+      const error = unreachable ? (label === 'Bambu Cloud' ? _t('אין גישה לענן של Bambu מהרשת הזו (ייתכן שפורט 8883 חסום)') : _t('המדפסת לא עונה בכתובת השמורה')) : '';
+      serials.filter(accept).forEach((s) => out.setPrinter(s, unreachable ? { conn: 'error', error } : { conn: 'offline' }, false));
     },
     onMessage: (topic, payload) => { const s = topic.split('/')[1]; const w = watchers[s]; if (w && accept(s)) w.onReport(JSON.parse(payload.toString('utf8'))); },
   });

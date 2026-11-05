@@ -73,6 +73,9 @@ function plateStatus(m) {
 // language picker: each language named in itself, so it reads the same in both
 const LANG_ROW = () => `<div class="field" style="display:flex;align-items:center;gap:10px;margin:4px 0 8px"><label style="margin:0">שפה · Language</label><select class="inp" id="olang" style="width:auto">${[['he', 'עברית'], ['en', 'English']].map(([k, l]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
 
+// which screen the app opens on
+const START_ROW = (cur) => `<div class="field" style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><label style="margin:0">${_t('מסך פתיחה')}</label><select class="inp" id="ostart" style="width:auto">${[['last', _t('המסך האחרון שהיה פתוח')], ['ok', _t('הדפסות שהצליחו')], ['history', _t('כל ההדפסות')], ['all', _t('כל הקבצים')], ['printer', _t('מסך המדפסת')]].map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+
 function toast(msg, err) {
   const t = document.createElement('div');
   t.className = 'toast' + (err ? ' err' : '');
@@ -212,9 +215,19 @@ async function openLibrary(dir) {
   }
   try { await lib.init(); } catch (e) { toast(_t('שגיאה בפתיחת הספרייה: ') + e.message, true); return; }
   lib.on((t, e) => { if (t === 'save-error') toast(_t('השמירה נכשלה: ') + (e && e.message), true); });
-  if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view;
+  // before the first import: these options change what it does
+  let opts = {};
+  if (native) { try { opts = (await native.sync.getState()).options || {}; S.autoModels = opts.autoModels !== false; S.autoMatch = opts.autoMatch !== false; S.autoUpdate = opts.autoUpdate !== false; } catch { } }
+  // first screen: the user's choice in Settings, or the last one used
+  const sv = opts.startView || 'last';
+  if (sv === 'last' || sv === 'printer') { if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view; }
+  else S.view = sv;
   renderShell();
   await rescan(true);
+  if (sv === 'printer' && native && native.sync.printer && !S.bound) {
+    const sn = Object.keys((S.sync && S.sync.printers) || {})[0];
+    if (sn) printerScreen(sn);
+  }
   if (S.bound) return;
   S.bound = true;
   window.addEventListener('focus', () => { if (Date.now() - S.lastScan > 8000) rescan(false); });
@@ -222,9 +235,10 @@ async function openLibrary(dir) {
   if (native) {
     native.onSync(() => syncPrints(false));
     if (native.sync.onModel) native.sync.onModel(onModelEvent);
-    try { const o = (await native.sync.getState()).options; S.autoModels = o.autoModels !== false; S.autoMatch = o.autoMatch !== false; } catch { }
-    setTimeout(() => checkUpdate(false), 8000);
-    setInterval(() => checkUpdate(false), 12 * 3600 * 1000);
+    // updates: soon after opening, every hour, and when the window comes back after a while
+    setTimeout(() => checkUpdate(false, true), 8000);
+    setInterval(() => checkUpdate(false), 3600 * 1000);
+    window.addEventListener('focus', () => { if (Date.now() - (S.lastUpdCheck || 0) > 30 * 60000) checkUpdate(false); });
   }
 }
 
@@ -300,6 +314,8 @@ function renderPrinterPill() {
     dot = state === 'running' || state === 'prepare' ? 'run' : state === 'failed' || state === 'error' ? 'bad' : state === 'offline' || state === 'silent' ? 'off' : 'idle';
     text = `${p.name || _t('מדפסת')} · ${PSTATE[state] || state}${state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${['running', 'pause', 'prepare'].includes(state) && p.job ? ` · ${p.job}` : ''}`;
   } else { text = _t('מסונכרן'); }
+  const perr = printers.map((x) => x.conn === 'error' && x.error).find(Boolean);
+  el.title = tx(perr || '') || _t('חיבור למדפסת');
   el.className = 'btn ppill';
   el.innerHTML = `<span class="pdot ${dot}"></span><span>${esc(text)}</span>`;
 }
@@ -495,21 +511,24 @@ function markSettingsUpdate() {
   b.classList.toggle('has-update', !!S.updateAvail);
   b.title = S.updateAvail ? _t`הגדרות · גרסה ${S.updateAvail.latest} זמינה` : _t('הגדרות');
 }
-async function checkUpdate(manual) {
+// atOpen: the check right after the app opens, the one moment an automatic update doesn't interrupt anything
+async function checkUpdate(manual, atOpen) {
   if (!native || !native.checkUpdate) return;
+  S.lastUpdCheck = Date.now();
   const r = await native.checkUpdate();
   // red ring on the settings button while a newer version is waiting
   S.updateAvail = r.update ? r : null;
   markSettingsUpdate();
   if (r.update) {
+    if (atOpen && r.canInstall && S.autoUpdate !== false && !S.updating) { toast(_t`מתקין את גרסה ${r.latest}…`); installUpdate(r); return; }
     if (!manual && S.updateShown === r.latest) return;
     S.updateShown = r.latest;
     const t = document.createElement('div');
     t.className = 'toast';
     t.innerHTML = _t`גרסה חדשה זמינה: ${esc(r.latest)} (יש לך ${esc(r.current)}) <button class="btn small" style="margin-inline-start:8px;background:transparent;color:inherit">${r.canInstall ? _t('עדכן עכשיו') : _t('הורד')}</button><div style="font-size:12px;opacity:.75;margin-top:4px">${r.canInstall ? _t('האפליקציה תוריד את הגרסה, תיסגר ותיפתח מחדש. ') : ''}ההגדרות, החיבור ל-Bambu והספרייה נשמרים.</div>`;
     $('button', t).onclick = () => { t.remove(); if (r.canInstall) installUpdate(r); else native.openUrl(r.url); };
-    $('#toasts').appendChild(t);
-    if (!manual) setTimeout(() => t.remove(), 30000);
+    t.onclick = (e) => { if (!e.target.closest('button')) t.remove(); };
+    $('#toasts').appendChild(t); // stays until used: it was easy to miss
   } else if (manual) {
     toast(r.error === 'private' ? _t('עדיין לא פורסמו גרסאות ציבוריות') : r.error ? _t('בדיקת העדכונים נכשלה') : _t`יש לך את הגרסה האחרונה (${r.current})`, !!r.error && r.error !== 'private');
   }
@@ -562,6 +581,8 @@ async function nativeSettings() {
 
     <div class="section-title">כללי</div>
     ${LANG_ROW()}
+    ${START_ROW(st.options.startView || 'last')}
+    <label class="chk"><input type="checkbox" id="oautoupd" ${st.options.autoUpdate !== false ? 'checked' : ''}> ${_t('לעדכן אוטומטית כשיש גרסה חדשה (בפתיחת האפליקציה)')}</label>
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <div class="alert-opts">
       <label class="chk"><input type="checkbox" id="oapause" ${st.options.alertPause !== false ? 'checked' : ''}> התראה כשהדפסה נעצרת או יש תקלה (עם קוד התקלה)</label>
@@ -592,7 +613,8 @@ async function nativeSettings() {
   };
   const save = async (quiet) => {
     collect();
-    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, alertPause: $('#oapause', box).checked, alertFirstLayer: $('#oafirst', box).checked, alertTenMin: $('#oaten', box).checked, alertAms: $('#oaams', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}), ...($('#oautomatch', box) ? { autoMatch: $('#oautomatch', box).checked } : {}), ...($('#otimelapse', box) ? { timelapse: $('#otimelapse', box).checked, timelapseDelete: $('#otldelete', box).checked } : {}) } });
+    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, alertPause: $('#oapause', box).checked, alertFirstLayer: $('#oafirst', box).checked, alertTenMin: $('#oaten', box).checked, alertAms: $('#oaams', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}), ...($('#oautomatch', box) ? { autoMatch: $('#oautomatch', box).checked } : {}), ...($('#otimelapse', box) ? { timelapse: $('#otimelapse', box).checked, timelapseDelete: $('#otldelete', box).checked } : {}), startView: $('#ostart', box).value, autoUpdate: $('#oautoupd', box).checked } });
+    S.autoUpdate = $('#oautoupd', box).checked;
     if ($('#oautomodels', box)) { S.autoModels = $('#oautomodels', box).checked; schedulePrefetch(); }
     if ($('#oautomatch', box) && S.autoMatch !== $('#oautomatch', box).checked) { S.autoMatch = $('#oautomatch', box).checked; syncPrints(true); }
     printers = (st.printers || []).map((p) => ({ ...p }));

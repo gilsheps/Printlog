@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs before every `git push` (enabled with: git config core.hooksPath .githooks).
+# Builds the window and runs the quick checks; a failure stops the push.
+echo "pre-push: npm run check"
+npm run --silent check || { echo "pre-push: checks failed, nothing was pushed (git push --no-verify skips this)"; exit 1; }

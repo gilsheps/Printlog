@@ -1,0 +1,12 @@
+const assert = require('assert');
+const { _t, tx, setLang } = require('../../app/i18n.js');
+const n = 3, name = 'Benchy';
+assert.strictEqual(_t`נרשמו ${n} הדפסות מהמדפסת`, 'נרשמו 3 הדפסות מהמדפסת');
+setLang('en');
+assert.strictEqual(_t`נרשמו ${n} הדפסות מהמדפסת`, '3 prints logged from the printer');
+assert.strictEqual(_t('ההדפסה הסתיימה'), 'Print finished');
+assert.strictEqual(_t`שויכה ל„${name}”${''}`, 'Assigned to “Benchy”');
+assert.strictEqual(tx('קוד שגוי'), 'Wrong code');
+assert.strictEqual(tx('not a key'), 'not a key');
+assert.strictEqual(_t`unknown ${1} text`, 'unknown 1 text', 'unknown keys fall back to the text itself');
+console.log('i18n ok');
