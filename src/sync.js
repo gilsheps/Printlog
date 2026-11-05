@@ -196,7 +196,8 @@ export function importPrints(lib, sync) {
       }
     }
     if (done) continue;
-    const m = (D.imported[e.key] && D.models[D.imported[e.key]]) || matchModel(lib, e, idx);
+    // lib.autoMatch === false: the user turned off looking for a matching file (assign by hand from the inbox)
+    const m = (D.imported[e.key] && D.models[D.imported[e.key]]) || (lib.autoMatch !== false ? matchModel(lib, e, idx) : null);
     if (!m) { res.unmatched.push(e); continue; }
     attach(lib, m, e);
     res.added++;

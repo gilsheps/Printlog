@@ -13,6 +13,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const I = {
   cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
   // card badges: downloaded from Bambu Cloud / in Google Drive / can be uploaded to Drive
   bambuDl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="M12 9.5v6M9.5 13l2.5 2.5 2.5-2.5"/></svg>',
   driveOk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="M9.3 13.6l1.9 1.9 3.6-3.8"/></svg>',
@@ -217,7 +218,7 @@ async function openLibrary(dir) {
   if (native) {
     native.onSync(() => syncPrints(false));
     if (native.sync.onModel) native.sync.onModel(onModelEvent);
-    try { S.autoModels = (await native.sync.getState()).options.autoModels !== false; } catch { }
+    try { const o = (await native.sync.getState()).options; S.autoModels = o.autoModels !== false; S.autoMatch = o.autoMatch !== false; } catch { }
     setTimeout(() => checkUpdate(false), 8000);
     setInterval(() => checkUpdate(false), 12 * 3600 * 1000);
   }
@@ -248,6 +249,7 @@ async function syncPrints(force) {
   const { data, changed } = await readSyncFile(lib);
   S.sync = data;
   if (data && (changed || force)) {
+    lib.autoMatch = S.autoMatch;
     const r = importPrints(lib, data);
     const hadInbox = (S.unmatched || []).length;
     S.unmatched = r.unmatched;
@@ -562,6 +564,9 @@ async function nativeSettings() {
       <label class="chk"><input type="checkbox" id="oaten" ${st.options.alertTenMin !== false ? 'checked' : ''}> התראה 10 דקות לפני סוף ההדפסה</label>
       <label class="chk"><input type="checkbox" id="oaams" ${st.options.alertAms !== false ? 'checked' : ''}> התראה כשפילמנט ב-AMS עומד להיגמר או כשהלחות גבוהה</label>
     </div>
+    ${!S.internalLib ? `<label class="chk"><input type="checkbox" id="oautomatch" ${st.options.autoMatch !== false ? 'checked' : ''}> לחפש בתיקייה קובץ שמתאים לכל הדפסה (לפי השם), ולהציג אותו במקום להוריד מ-Bambu</label>` : ''}
+    ${usesLan ? `<label class="chk"><input type="checkbox" id="otimelapse" ${st.options.timelapse !== false ? 'checked' : ''}> לייבא טיימלפס מהמדפסת לכל הדפסה (רק כשהמדפסת זמינה ברשת הביתית)</label>
+    <label class="chk" style="margin-inline-start:22px"><input type="checkbox" id="otldelete" ${st.options.timelapseDelete ? 'checked' : ''}> אחרי הייבוא, למחוק את הטיימלפס מהמדפסת כדי לפנות מקום</label>` : ''}
     ${usesCloud ? `<label class="chk"><input type="checkbox" id="oautomodels" ${st.options.autoModels !== false ? 'checked' : ''}> להוריד ברקע מ-Bambu את המודלים של ההדפסות, לתצוגה בתלת-ממד <span class="hint" data-msize style="display:inline"></span></label>` : ''}
     <label class="chk"><input type="checkbox" id="ologin" ${st.options.openAtLogin ? 'checked' : ''}> הפעל עם המחשב (ברקע)</label>
     <label class="chk"><input type="checkbox" id="otray" ${st.options.closeToTray ? 'checked' : ''}> כשסוגרים את החלון, להמשיך לרוץ ברקע. בלי זה, ההיסטוריה נמשכת מ-Bambu בכל פתיחה ובלחיצה על „רענן”.</label>
@@ -582,8 +587,9 @@ async function nativeSettings() {
   };
   const save = async (quiet) => {
     collect();
-    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, alertPause: $('#oapause', box).checked, alertFirstLayer: $('#oafirst', box).checked, alertTenMin: $('#oaten', box).checked, alertAms: $('#oaams', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}) } });
+    st = await native.sync.setConfig({ mode: st.mode, printers, options: { notify: $('#onotify', box).checked, alertPause: $('#oapause', box).checked, alertFirstLayer: $('#oafirst', box).checked, alertTenMin: $('#oaten', box).checked, alertAms: $('#oaams', box).checked, openAtLogin: $('#ologin', box).checked, closeToTray: $('#otray', box).checked, ...($('#oautomodels', box) ? { autoModels: $('#oautomodels', box).checked } : {}), ...($('#oautomatch', box) ? { autoMatch: $('#oautomatch', box).checked } : {}), ...($('#otimelapse', box) ? { timelapse: $('#otimelapse', box).checked, timelapseDelete: $('#otldelete', box).checked } : {}) } });
     if ($('#oautomodels', box)) { S.autoModels = $('#oautomodels', box).checked; schedulePrefetch(); }
+    if ($('#oautomatch', box) && S.autoMatch !== $('#oautomatch', box).checked) { S.autoMatch = $('#oautomatch', box).checked; syncPrints(true); }
     printers = (st.printers || []).map((p) => ({ ...p }));
     if (!quiet) toast('ההגדרות נשמרו');
   };
@@ -1062,6 +1068,7 @@ function printItems() {
     it.lastOk = it.runs.find((r) => r.result === 'ok');
     it.lastFail = it.runs.find((r) => r.result === 'fail' || r.result === 'cancel' || r.result === 'partial');
     it.cover = (it.runs.find((r) => r.coverFile) || {}).coverFile || '';
+    it.timelapse = ((it.runs.find((r) => r.entry && r.entry.timelapse) || {}).entry || {}).timelapse || '';
   }
   return [...items.values()];
 }
@@ -1077,6 +1084,23 @@ async function coverURL(file) {
     coverCache.set(file, url);
     return url;
   } catch { coverCache.set(file, null); return null; }
+}
+
+// timelapse from the printer: mp4 plays here, anything else (P1 .avi) opens in the system player
+async function playTimelapse(rel) {
+  if (!/\.mp4$/i.test(rel)) { if (native && native.sync.openTimelapse) native.sync.openTimelapse(rel); return; }
+  let url = null;
+  try {
+    const dir = await lib.meta.getDirectoryHandle('timelapse');
+    url = URL.createObjectURL(await (await dir.getFileHandle(rel.replace(/^timelapse\//, ''))).getFile());
+  } catch { }
+  if (!url) { toast('הטיימלפס לא נמצא במחשב'); return; }
+  const d = document.createElement('div');
+  d.className = 'dialog';
+  d.innerHTML = `<div class="box wide"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">טיימלפס</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div><video src="${url}" controls autoplay style="width:100%;max-height:70vh;border-radius:10px;background:#000"></video></div>`;
+  const close = () => { d.remove(); URL.revokeObjectURL(url); };
+  d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) close(); });
+  document.body.appendChild(d);
 }
 
 // where a model's current file lives: the connected folder, downloaded from Bambu Cloud, or Drive / the archive
@@ -1208,7 +1232,7 @@ function itemCardHTML(it, kind) {
   const dk = !it.model ? dlKey(it) : '';
   const ds = dk ? dlState(it, dk) : null;
   return `<div class="card ${sel ? 'selected' : ''} ${ds ? dlClass(ds) : ''}" data-item="${esc(it.key)}" ${it.model ? `data-id="${it.model.id}"` : ''} ${dk ? `data-dlkey="${esc(dk)}" style="--p:${ds.p || 0}"` : ''}>
-    <div class="thumbwrap">${cloudBtn(it.model)}${dk ? `<div class="dlbar"><i></i></div><span class="dlmsg">${dlLabel(ds)}</span>` : ''}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
+    <div class="thumbwrap">${cloudBtn(it.model)}${it.timelapse ? `<button class="tlbtn" data-tl="${esc(it.timelapse)}" title="טיימלפס של ההדפסה">${I.play}</button>` : ''}${dk ? `<div class="dlbar"><i></i></div><span class="dlmsg">${dlLabel(ds)}</span>` : ''}<div class="thumb" ${it.cover && !cached ? `data-cover="${esc(it.cover)}"` : path && !url ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}>${url ? `<img src="${url}" alt="" loading="lazy">` : `<div class="ph">${I.cube}</div>`}</div></div>
     <div class="badges">${it.plate && it.multiPlate ? `<span class="badge accent">פלטה ${it.plate}</span>` : ''}${count > 1 ? `<span class="badge accent">×${count}</span>` : ''}${it.model || dk ? '' : itemFileBadge(it)}</div>
     ${it.model ? `<div class="check" data-check title="בחר">${I.check}</div>` : ''}
     <div class="body">
@@ -1508,6 +1532,8 @@ function onGridClick(e) {
   if (e.target.closest('.inbox')) { onInboxClick(e); return; }
   const cb = e.target.closest('[data-cloud]');
   if (cb) { e.stopPropagation(); onCloudBtn(cb.dataset.cloud); return; }
+  const tl = e.target.closest('[data-tl]');
+  if (tl) { e.stopPropagation(); playTimelapse(tl.dataset.tl); return; }
   const itc = e.target.closest('[data-item]');
   const card = e.target.closest('.card');
   if (!card) return;

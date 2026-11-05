@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('shelfNative', {
     logout: () => ipcRenderer.invoke('sync:logout'),
     discover: () => ipcRenderer.invoke('sync:discover'),
     syncNow: () => ipcRenderer.invoke('sync:now'),
+    openTimelapse: (rel) => ipcRenderer.invoke('sync:openTimelapse', rel),
   },
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
   wipe: (o) => ipcRenderer.invoke('app:wipe', o),

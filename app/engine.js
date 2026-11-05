@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
+const { syncPrinter: syncTimelapse } = require('./timelapse');
 
 const API = {
   login: 'https://api.bambulab.com/v1/user-service/user/login',
@@ -195,7 +196,7 @@ class Output {
     this.file = path.join(library, '.shelf', OUT_NAME);
     this.onWrite = onWrite;
     this.data = { schema: 1, helper: {}, printers: {}, prints: [] };
-    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; if (d.idsVer) this.data.idsVer = d.idsVer; } catch { }
+    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; if (d.idsVer) this.data.idsVer = d.idsVer; if (Array.isArray(d.timelapseSeen)) this.data.timelapseSeen = d.timelapseSeen; } catch { }
     this.data.helper = { version: 'app', app: true, mode, host: os.hostname(), started: nowIso() };
     this.lastWrite = 0; this.pending = false;
   }
@@ -216,7 +217,7 @@ class Output {
     if (i >= 0) { P[i] = { ...P[i], ...e }; return false; }
     if (e.source === 'cloud') {
       const j = P.findIndex((p) => (p.source === 'lan-live' || p.source === 'cloud-live') && this.samePrint(p, e));
-      if (j >= 0) { e.aliasKeys = [...new Set([...(P[j].aliasKeys || []), P[j].key])]; P[j] = e; return false; }
+      if (j >= 0) { e.aliasKeys = [...new Set([...(P[j].aliasKeys || []), P[j].key])]; if (P[j].timelapse) e.timelapse = P[j].timelapse; P[j] = e; return false; }
     } else if (P.some((p) => p.source === 'cloud' && this.samePrint(p, e))) return false;
     P.push(e);
     P.sort((a, b) => (b.start || '').localeCompare(a.start || ''));
@@ -576,6 +577,7 @@ class Engine {
     this.clients = [];
     this.watchers = {};
     clearTimeout(this.timer);
+    clearTimeout(this.tlTimer);
     clearInterval(this.flushT);
     if (this.out) this.out.setHelper({ stopped: nowIso() });
     this.out = null;
@@ -609,7 +611,8 @@ class Engine {
       this.fetchingDevices = true;
       this.refreshDevices().then((n) => { this.fetchingDevices = false; if (n) this.start(); }).catch((e) => { this.fetchingDevices = false; this.log(`devices: ${e.message}`); });
     }
-    const onPrint = (e) => { if (cfg.options?.notify !== false) this.notify(e); };
+    // the printer needs a few minutes to encode the timelapse after a print
+    const onPrint = (e) => { if (cfg.options?.notify !== false) this.notify(e); this.loopTimelapse(4 * 60000); };
     const OPT = { pause: 'alertPause', firstLayer: 'alertFirstLayer', tenMin: 'alertTenMin', ams: 'alertAms' };
     const onAlert = (a) => { const o = this.getConfig().options || {}; if (o[OPT[a.kind]] !== false) { this.log(`alert: ${a.kind} ${a.title} - ${a.body}`); this.alert(a); } };
     // live status: straight from the printer on the LAN when we have its IP + access code,
@@ -641,6 +644,27 @@ class Engine {
     } else if (viaCloud.length) this.log('live: cloud printers but no cloud token - sign in again');
     this.flushT = setInterval(() => out.flush(), 5000);
     if (cfg.mode === 'cloud' || cfg.mode === 'both') this.loopHistory(true);
+    this.loopTimelapse(60000);
+  }
+  // timelapses: only from printers whose LAN link is up right now (never knock on a stale IP)
+  loopTimelapse(delay) {
+    clearTimeout(this.tlTimer);
+    this.tlTimer = setTimeout(() => this.syncTimelapses().catch(() => 0).finally(() => { if (this.out) this.loopTimelapse(30 * 60000); }), delay);
+  }
+  async syncTimelapses() {
+    const cfg = this.getConfig();
+    const o = cfg.options || {};
+    if (!this.out || o.timelapse === false || this.tlBusy) return 0;
+    this.tlBusy = true;
+    let n = 0;
+    try {
+      for (const p of cfg.printers || []) {
+        const w = this.watchers[p.serial];
+        if (!p.ip || !p.access_code || !w || !w.lanUp || !this.out) continue;
+        n += await syncTimelapse({ printer: p, library: cfg.library, out: this.out, del: !!o.timelapseDelete, log: this.log });
+      }
+    } finally { this.tlBusy = false; }
+    return n;
   }
   async loopHistory(first) {
     clearTimeout(this.timer);

@@ -236,6 +236,12 @@ ipcMain.handle('sync:login', (_e, a) => engine.login(a));
 ipcMain.handle('sync:verify', (_e, a) => engine.verify(a));
 ipcMain.handle('sync:logout', () => { const c = cfg(); if (c.cloud) { delete c.cloud.token; delete c.cloud.tokenEnc; } saveCfg(c); engine.start(); return publicState(); });
 ipcMain.handle('sync:discover', () => discover(8000, (m) => engine && engine.log(m)));
+// play a timelapse the window can't (the .avi of P1 printers) in the system player
+ipcMain.handle('sync:openTimelapse', (_e, rel) => {
+  if (!/^timelapse\/[^/\\]+\.(mp4|avi)$/i.test(rel || '')) return false;
+  shell.openPath(path.join(cfg().library, '.shelf', rel));
+  return true;
+});
 ipcMain.handle('sync:printer', (_e, serial) => { try { return engine.printerDetail(serial); } catch { return null; } });
 ipcMain.handle('sync:prefetch', (_e, keys) => { try { if (!engine.out) engine.start(); return engine.prefetch(Array.isArray(keys) ? keys.slice(0, 5000) : []); } catch { return 0; } });
 ipcMain.handle('sync:modelsSize', () => {
