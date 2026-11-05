@@ -64,7 +64,6 @@ jobs:
           name: PrintLog-${{ matrix.label }}
           path: |
             release/*.dmg
-            release/*.zip
             release/*.exe
           if-no-files-found: error
 

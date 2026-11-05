@@ -13,6 +13,10 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const I = {
   cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/></svg>',
+  // card badges: downloaded from Bambu Cloud / in Google Drive / can be uploaded to Drive
+  bambuDl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="M12 9.5v6M9.5 13l2.5 2.5 2.5-2.5"/></svg>',
+  driveOk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="M9.3 13.6l1.9 1.9 3.6-3.8"/></svg>',
+  driveUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/><path d="M12 16v-6M9.5 12.5L12 10l2.5 2.5"/></svg>',
   mark: '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50.00,27.00 76.00,42.00 50.00,57.00 24.00,42.00" fill="#fff"/><polygon points="24.00,42.80 50.00,57.80 50.00,62.20 24.00,47.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,57.80 76.00,42.80 76.00,47.20 50.00,62.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,48.80 50.00,63.80 50.00,68.20 24.00,53.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,63.80 76.00,48.80 76.00,53.20 50.00,68.20" fill="#fff" fill-opacity="0.5"/><polygon points="24.00,54.80 50.00,69.80 50.00,74.20 24.00,59.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,69.80 76.00,54.80 76.00,59.20 50.00,74.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,60.80 50.00,75.80 50.00,80.20 24.00,65.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,75.80 76.00,60.80 76.00,65.20 50.00,80.20" fill="#fff" fill-opacity="0.5"/><polygon points="24.00,66.80 50.00,81.80 50.00,86.20 24.00,71.20" fill="#fff" fill-opacity="0.92"/><polygon points="50.00,81.80 76.00,66.80 76.00,71.20 50.00,86.20" fill="#fff" fill-opacity="0.62"/><polygon points="24.00,72.80 50.00,87.80 50.00,92.20 24.00,77.20" fill="#fff" fill-opacity="0.78"/><polygon points="50.00,87.80 76.00,72.80 76.00,77.20 50.00,92.20" fill="#fff" fill-opacity="0.5"/><polygon points="41.00,11.00 59.00,11.00 54.00,20.00 46.00,20.00" fill="#1f1d1a"/><polygon points="47.80,20.00 52.20,20.00 50.00,24.50" fill="#1f1d1a"/></svg>',
   logo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 18h16M6 14h12M8 10h8M10 6h4"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
@@ -909,6 +913,7 @@ function renderShell() {
     if (kind === 'view') { S.view = val; S.tag = null; S.folder = null; lib.data.prefs = { ...(lib.data.prefs || {}), view: val }; lib.save(); }
     if (kind === 'tag') { S.tag = S.tag === val ? null : val; }
     if (kind === 'folder') { S.folder = S.folder === val ? null : val; }
+    if (kind === 'src') { S.src = S.src === val ? null : val; if (S.src && ['ok', 'fail', 'history', 'inbox'].includes(S.view)) S.view = 'all'; }
     renderAll();
   });
   $('#grid').addEventListener('click', onGridClick);
@@ -917,7 +922,7 @@ function renderShell() {
     if (e.target.id === 'splitp') { lib.data.prefs = { ...(lib.data.prefs || {}), splitPlates: e.target.checked }; lib.save(); renderGrid(); }
   });
   $('#toolbar').addEventListener('click', (e) => {
-    if (e.target.closest('[data-clear]')) { if (S.tag || S.folder != null) S.view = 'all'; S.tag = null; S.folder = null; S.q = ''; $('#q').value = ''; renderAll(); }
+    if (e.target.closest('[data-clear]')) { if (S.tag || S.folder != null) S.view = 'all'; S.tag = null; S.folder = null; S.src = null; S.q = ''; $('#q').value = ''; renderAll(); }
     if (e.target.closest('[data-archiveall]')) archiveModels(toArchive());
   });
 
@@ -1004,9 +1009,10 @@ function renderSidebar() {
     ${pv.map(nav).join('')}
     ${native && native.sync.printer ? Object.entries((S.sync && S.sync.printers) || {}).map(([sn, p]) => `<button class="nav-item" data-pscreen="${esc(sn)}" title="מסך המדפסת: טמפרטורות, AMS, תקלות וסטטיסטיקה">${I.printer}<span class="lbl">${esc(p.name || sn)}</span><span class="count"><span class="pdot ${['running', 'prepare'].includes(p.state) ? 'run' : p.conn === 'offline' || p.conn === 'error' ? 'off' : 'idle'}"></span></span></button>`).join('') : ''}
     <button class="nav-item" data-printer style="margin-top:2px">${I.gear}<span class="lbl">הגדרות וחיבור למדפסת</span><span class="count">${S.sync ? '<span class="pdot ' + (helperState().kind === 'ok' ? 'run' : 'off') + '"></span>' : ''}</span></button>
-    <h4>תיקייה</h4>
+    <h4>${S.internalLib ? 'קבצים' : 'תיקייה'}</h4>
     ${fv.map(nav).join('')}
-    ${folderList.length > 1 ? folderList.map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}
+    ${srcNav(models)}
+    ${!S.internalLib && folderList.filter(([d]) => !d.startsWith('@')).length > 1 ? folderList.filter(([d]) => !d.startsWith('@')).map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}
     ${tags.size ? `<h4>תגיות</h4>${[...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'he')).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('')}` : ''}
   `;
 }
@@ -1073,14 +1079,30 @@ async function coverURL(file) {
   } catch { coverCache.set(file, null); return null; }
 }
 
-// cloud button on a card: lit = the file is in the cloud, grey = only on this computer (click to upload)
+// where a model's current file lives: the connected folder, downloaded from Bambu Cloud, or Drive / the archive
+const SRC = { local: ['במחשב', 'folder'], bambu: ['מ-Bambu Cloud', 'bambuDl'], drive: ['ב-Drive / ארכיון', 'driveOk'] };
+function srcOf(m) {
+  const p = M.cur(m).path;
+  return p.startsWith('@models/') ? 'bambu' : isArchived(p) ? 'drive' : 'local';
+}
+function srcNav(models) {
+  const n = { local: 0, bambu: 0, drive: 0 };
+  for (const m of models) n[srcOf(m)]++;
+  if (S.internalLib) n.local = 0; // no folder connected: nothing "on this computer" to show
+  const keys = Object.keys(n).filter((k) => n[k]);
+  if (!keys.length) return '';
+  return keys.map((k) => `<button class="nav-item sub ${S.src === k ? 'active' : ''}" data-nav="src" data-val="${k}">${I[SRC[k][1]]}<span class="lbl">${SRC[k][0]}</span><span class="count">${n[k]}</span></button>`).join('');
+}
+
+// badge on a card: green = downloaded from Bambu Cloud, blue = in Google Drive / the archive,
+// grey = only on this computer (click to upload; shown only when Drive or an archive folder is set up)
 function cloudBtn(m) {
   if (!native || !m) return '';
   const p = M.cur(m).path;
-  if (/^@(gdrive|archive)\//.test(p)) return `<button class="cloudbtn on" data-cloud="${m.id}" title="${p.startsWith('@gdrive/') ? 'בענן (Google Drive). לחיצה: החזר לתיקייה' : 'בארכיון'}">${I.cloud}</button>`;
-  if (p.startsWith('@models/')) return `<span class="cloudbtn on" title="הורד מ-Bambu ונשמר אצלך">${I.cloud}</span>`;
-  if (!hasLocal(m)) return '';
-  return `<button class="cloudbtn" data-cloud="${m.id}" title="רק במחשב. לחיצה: העלה ל-Google Drive">${I.cloud}</button>`;
+  if (/^@(gdrive|archive)\//.test(p)) return `<button class="cloudbtn on" data-cloud="${m.id}" title="${p.startsWith('@gdrive/') ? 'ב-Google Drive. לחיצה: החזר לתיקייה' : 'בארכיון'}">${I.driveOk}</button>`;
+  if (p.startsWith('@models/')) return `<span class="cloudbtn bambu" title="הורד מ-Bambu Cloud ונשמר במחשב">${I.bambuDl}</span>`;
+  if (!hasLocal(m) || !archiveOn()) return '';
+  return `<button class="cloudbtn" data-cloud="${m.id}" title="רק במחשב. לחיצה: העלה ל-Google Drive">${I.driveUp}</button>`;
 }
 async function onCloudBtn(id) {
   const m = lib.data.models[id];
@@ -1304,6 +1326,7 @@ function filtered() {
     if (S.view === 'versions' && m.versions.length < 2) return false;
     if (S.tag && !m.tags.includes(S.tag)) return false;
     if (S.folder != null && dirName(M.cur(m).path) !== S.folder) return false;
+    if (S.src && srcOf(m) !== S.src) return false;
     if (terms.length) {
       const r = M.rec(M.cur(m).path);
       const hay = [m.name, m.notes, ...m.tags, ...m.versions.map((v) => v.path + ' ' + (v.note || '')), r.meta?.designer, r.meta?.title, ...m.prints.map((p) => `${p.notes || ''} ${p.material || ''}`)].join(' ').toLowerCase();
@@ -1326,10 +1349,10 @@ function renderToolbar() {
   const hist = S.view === 'history' && !S.tag && S.folder == null;
   const itemsView = (S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null;
   const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : itemsView ? printItems().filter((it) => (S.view === 'ok' ? it.n.ok : it.n.fail + it.n.cancel + it.n.partial)).length : filtered().length;
-  const title = S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל הקבצים', fav: 'מועדפים', ok: 'הדפסות שהצליחו', fail: 'הדפסות שנכשלו', never: 'עוד לא הודפסו', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'כל ההדפסות' }[S.view];
+  const title = (S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || 'תיקייה ראשית') : { all: 'כל הקבצים', fav: 'מועדפים', ok: 'הדפסות שהצליחו', fail: 'הדפסות שנכשלו', never: 'עוד לא הודפסו', versions: 'עם כמה גרסאות', inbox: 'הדפסות לא משויכות', history: 'כל ההדפסות' }[S.view]) + (S.src && !inbox && !hist && !itemsView ? ' · ' + SRC[S.src][0] : '');
   $('#toolbar').innerHTML = `
     <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? 'הדפסות' : itemsView ? 'פריטים' : 'קבצים'}</span>
-    ${S.tag || S.folder != null || S.q ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
+    ${S.tag || S.folder != null || S.src || S.q ? '<button class="btn small ghost" data-clear>נקה סינון</button>' : ''}
     <span id="prog" class="progress"></span>
     ${native && archiveOn() && S.view === 'ok' && itemsView ? (toArchive().length ? `<button class="btn small" data-archiveall title="מעלה ל-Drive את הקבצים של כל מה שהצליח ומוחק אותם מהמחשב">☁ העלה ל-Drive (${toArchive().length})</button>` : `<span class="btn small ghost" style="cursor:default" title="כל הקבצים של הדפסות שהצליחו כבר בארכיון">☁ הכול בארכיון</span>`) : ''}
     <span class="spacer" style="flex:1"></span>

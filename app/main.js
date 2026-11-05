@@ -284,8 +284,8 @@ ipcMain.handle('app:checkUpdate', async () => {
     const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
     const find = (re) => (j.assets || []).find((a) => re.test(a.name));
     const asset = process.platform === 'darwin' ? find(new RegExp(`mac-${arch}\\.dmg$`)) : process.platform === 'win32' ? find(/\.exe$/) : null;
-    // what the app can install by itself: the mac .zip (swap the .app) or the Windows installer (silent)
-    const auto = process.platform === 'darwin' ? find(new RegExp(`mac-${arch}\\.zip$`)) : process.platform === 'win32' ? find(/\.exe$/) : null;
+    // what the app can install by itself: the mac .dmg (swap the .app) or the Windows installer (silent)
+    const auto = asset;
     return { current: app.getVersion(), latest, update: !!latest && newer(latest, app.getVersion()), url: (asset && asset.browser_download_url) || j.html_url, page: j.html_url, notes: (j.body || '').slice(0, 1500), canInstall: !!(auto && app.isPackaged), installUrl: auto ? auto.browser_download_url : '', size: auto ? auto.size : 0 };
   } catch (e) { return { current: app.getVersion(), error: e.message }; }
 });
@@ -314,9 +314,14 @@ ipcMain.handle('app:installUpdate', async (_e, url) => {
     } else if (process.platform === 'darwin') {
       const appPath = path.resolve(app.getPath('exe'), '../../..'); // …/PrintLog.app
       if (!appPath.endsWith('.app')) throw new Error('לא מצאנו את מיקום האפליקציה');
-      const ex = path.join(dir, 'x');
-      execFileSync('/usr/bin/ditto', ['-x', '-k', file, ex]);
-      const name = fs.readdirSync(ex).find((n) => n.endsWith('.app'));
+      // copy the .app out of the mounted dmg, then detach it
+      const ex = path.join(dir, 'x'), mnt = path.join(dir, 'mnt');
+      execFileSync('/usr/bin/hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mnt, file]);
+      let name;
+      try {
+        name = fs.readdirSync(mnt).find((n) => n.endsWith('.app'));
+        if (name) execFileSync('/usr/bin/ditto', [path.join(mnt, name), path.join(ex, name)]);
+      } finally { try { execFileSync('/usr/bin/hdiutil', ['detach', mnt, '-force']); } catch { } }
       if (!name) throw new Error('קובץ העדכון לא תקין');
       const next = path.join(ex, name);
       try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', next]); } catch { }

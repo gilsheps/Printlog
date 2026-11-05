@@ -419,10 +419,13 @@ class MiniMQTT {
   stop() { this.running = false; clearTimeout(this.timer); clearInterval(this.ping); try { this.send(0xE0, Buffer.alloc(0)); this.sock.destroy(); } catch { } }
 }
 
-function startMqtt({ host, port = 8883, user, password, serials, watchers, insecure, label, out, log }) {
+// accept(serial): whether this connection currently speaks for that printer (status + reports);
+// onState(up) runs before accept is asked, so a LAN link can hand a printer over to the cloud when it drops
+function startMqtt({ host, port = 8883, user, password, serials, watchers, insecure, label, out, log, accept = () => true, onState }) {
   return new MiniMQTT({
     host, port, user, password, insecure,
     onConnect: (c, rc) => {
+      if (onState) onState(rc === 0);
       if (rc === 0) {
         log(`${label}: connected`);
         serials.forEach((s, i) => {
@@ -433,11 +436,15 @@ function startMqtt({ host, port = 8883, user, password, serials, watchers, insec
       } else {
         const reason = { 4: 'Access Code / חיבור שגוי', 5: 'אין הרשאה' }[rc] || `קוד ${rc}`;
         log(`${label}: refused (${reason})`);
-        serials.forEach((s) => out.setPrinter(s, { conn: 'error', error: reason }, false));
+        serials.filter(accept).forEach((s) => out.setPrinter(s, { conn: 'error', error: reason }, false));
       }
     },
-    onDown: (e) => { log(`${label}: disconnected (${e.message})`); serials.forEach((s) => out.setPrinter(s, { conn: 'offline' }, false)); },
-    onMessage: (topic, payload) => { const w = watchers[topic.split('/')[1]]; if (w) w.onReport(JSON.parse(payload.toString('utf8'))); },
+    onDown: (e) => {
+      if (onState) onState(false);
+      log(`${label}: disconnected (${e.message})`);
+      serials.filter(accept).forEach((s) => out.setPrinter(s, { conn: 'offline' }, false));
+    },
+    onMessage: (topic, payload) => { const s = topic.split('/')[1]; const w = watchers[s]; if (w && accept(s)) w.onReport(JSON.parse(payload.toString('utf8'))); },
   });
 }
 
@@ -607,6 +614,10 @@ class Engine {
     const onAlert = (a) => { const o = this.getConfig().options || {}; if (o[OPT[a.kind]] !== false) { this.log(`alert: ${a.kind} ${a.title} - ${a.body}`); this.alert(a); } };
     // live status: straight from the printer on the LAN when we have its IP + access code,
     // otherwise through Bambu Cloud (like the Home Assistant integration)
+    // "both": a printer with an IP is also followed through the cloud, which takes over whenever the LAN
+    // link is down (away from home, or the saved IP now belongs to another device)
+    const cloudOk = !!(cfg.cloud?.token && cfg.cloud?.user);
+    const both = cfg.mode === 'both' && cloudOk;
     const viaCloud = [];
     for (const p of printers) {
       const lanOk = (cfg.mode === 'lan' || cfg.mode === 'both') && p.ip && p.access_code;
@@ -614,18 +625,19 @@ class Engine {
         const w = { [p.serial]: new LiveWatcher(out, p.serial, p.name || p.serial, 'lan', onPrint) };
         this.watchers[p.serial] = w[p.serial];
         w[p.serial].onAlert = onAlert;
-        this.log(`live: ${p.name} via LAN ${p.ip}`);
-        this.clients.push(startMqtt({ host: p.ip, user: 'bblp', password: p.access_code, serials: [p.serial], watchers: w, insecure: true, label: `${p.name} (LAN)`, out, log: this.log }));
+        this.log(`live: ${p.name} via LAN ${p.ip}${both ? ' (cloud as fallback)' : ''}`);
+        const onState = (up) => { w[p.serial].lanUp = up; w[p.serial].source = up || !both ? 'lan' : 'cloud'; };
+        this.clients.push(startMqtt({ host: p.ip, user: 'bblp', password: p.access_code, serials: [p.serial], watchers: w, insecure: true, label: `${p.name} (LAN)`, out, log: this.log, onState, accept: () => !both || w[p.serial].lanUp }));
+        if (both) viaCloud.push(p);
       } else if (cfg.mode !== 'lan') viaCloud.push(p);
       else { this.log(`live: ${p.name} skipped - no IP / access code`); out.setPrinter(p.serial, { name: p.name, conn: 'error', error: 'חסרים IP או Access Code' }, false); }
     }
-    if (viaCloud.length && cfg.cloud?.token && cfg.cloud?.user) {
-      const ws = Object.fromEntries(viaCloud.map((p) => [p.serial, new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
-      Object.assign(this.watchers, ws);
-      Object.values(ws).forEach((x) => { x.onAlert = onAlert; });
+    if (viaCloud.length && cloudOk) {
+      const ws = Object.fromEntries(viaCloud.map((p) => [p.serial, this.watchers[p.serial] || new LiveWatcher(out, p.serial, p.name || p.serial, 'cloud', onPrint)]));
+      for (const [s, x] of Object.entries(ws)) if (!this.watchers[s]) { this.watchers[s] = x; x.onAlert = onAlert; }
       this.log(`live: ${viaCloud.map((p) => p.name).join(', ')} via Bambu Cloud`);
-      for (const p of viaCloud) out.setPrinter(p.serial, { name: p.name, conn: 'connecting' }, false);
-      this.clients.push(startMqtt({ host: cfg.cloud.region === 'china' ? 'cn.mqtt.bambulab.com' : 'us.mqtt.bambulab.com', user: cfg.cloud.user, password: cfg.cloud.token, serials: Object.keys(ws), watchers: ws, insecure: false, label: 'Bambu Cloud', out, log: this.log }));
+      for (const p of viaCloud) if (!this.watchers[p.serial].lanUp) out.setPrinter(p.serial, { name: p.name, conn: 'connecting' }, false);
+      this.clients.push(startMqtt({ host: cfg.cloud.region === 'china' ? 'cn.mqtt.bambulab.com' : 'us.mqtt.bambulab.com', user: cfg.cloud.user, password: cfg.cloud.token, serials: Object.keys(ws), watchers: ws, insecure: false, label: 'Bambu Cloud', out, log: this.log, accept: (s) => !ws[s].lanUp }));
     } else if (viaCloud.length) this.log('live: cloud printers but no cloud token - sign in again');
     this.flushT = setInterval(() => out.flush(), 5000);
     if (cfg.mode === 'cloud' || cfg.mode === 'both') this.loopHistory(true);
