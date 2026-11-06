@@ -38,6 +38,9 @@ const I = {
   prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>',
   next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>',
   merge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4v5a5 5 0 0 0 5 5h7M6 20v-6M15 11l3 3-3 3"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>',
+  bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 4h12v16l-6-4-6 4z"/></svg>',
+  ext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>',
   printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M9 7v6l3 3 3-3V7M7 18h10"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
@@ -74,7 +77,9 @@ function plateStatus(m) {
 const LANG_ROW = () => `<div class="field" style="display:flex;align-items:center;gap:10px;margin:4px 0 8px"><label style="margin:0">שפה · Language</label><select class="inp" id="olang" style="width:auto">${[['he', 'עברית'], ['en', 'English']].map(([k, l]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
 
 // which screen the app opens on
-const START_ROW = (cur) => `<div class="field" style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><label style="margin:0">${_t('מסך פתיחה')}</label><select class="inp" id="ostart" style="width:auto">${[['last', _t('המסך האחרון שהיה פתוח')], ['ok', _t('הדפסות שהצליחו')], ['history', _t('כל ההדפסות')], ['all', _t('כל הקבצים')], ['printer', _t('מסך המדפסת')]].map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+const START_ROW = (cur) => `<div class="field" style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><label style="margin:0">${_t('מסך פתיחה')}</label><select class="inp" id="ostart" style="width:auto">${[['last', _t('המסך האחרון שהיה פתוח')], ['ok', _t('הדפסות שהצליחו')], ['history', _t('כל ההדפסות')], ['all', _t('כל הקבצים')], ['printer', _t('מסך המדפסת')], ...(native && native.makerworld ? [['mine', _t('המודלים שלי ב-MakerWorld')]] : [])].map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+// fallback when not signed in to Bambu: the user's MakerWorld profile link, so "My MakerWorld models" knows who they are
+const MW_ROW = (cur) => (native && native.makerworld ? `<div class="field" style="margin:0 0 8px"><label>${_t('פרופיל MakerWorld')}</label><input class="inp ltr" id="omwprof" value="${esc(cur || '')}" placeholder="https://makerworld.com/en/@user_…"><div class="hint">${_t('צריך רק אם לא התחברת לחשבון Bambu: הקישור לפרופיל שלך ב-MakerWorld, כדי להציג את המודלים שפרסמת.')}</div></div>` : '');
 
 function toast(msg, err) {
   const t = document.createElement('div');
@@ -122,7 +127,7 @@ function cancelParses(tag) {
 
 /* ================= state ================= */
 let lib = null;
-const S = { q: '', view: 'ok', tag: null, folder: null, sort: 'recent', selected: new Set(), open: null, tab: 'details', viewPath: null, printForm: null, lastScan: 0 };
+const S = { q: '', view: 'ok', tag: null, folder: null, sort: 'recent', selected: new Set(), open: null, tab: 'details', viewPath: null, printForm: null, lastScan: 0, mw: null, mwProfile: '' };
 const useOPFS = new URLSearchParams(location.search).has('opfs');
 
 const M = {
@@ -315,11 +320,12 @@ async function openLibrary(dir) {
   lib.on((t, e) => { if (t === 'save-error') toast(_t('השמירה נכשלה: ') + (e && e.message), true); });
   // before the first import: these options change what it does
   let opts = {};
-  if (native) { try { opts = (await native.sync.getState()).options || {}; S.autoModels = opts.autoModels !== false; S.autoMatch = opts.autoMatch !== false; S.autoUpdate = opts.autoUpdate !== false; } catch { } }
+  if (native) { try { opts = (await native.sync.getState()).options || {}; S.autoModels = opts.autoModels !== false; S.autoMatch = opts.autoMatch !== false; S.autoUpdate = opts.autoUpdate !== false; S.mwProfile = opts.mwProfile || ''; } catch { } }
   // first screen: the user's choice in Settings, or the last one used
   const sv = opts.startView || 'last';
   if (sv === 'last' || sv === 'printer') { if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view; }
   else S.view = sv;
+  if (S.view === 'mine' && !(native && native.makerworld)) S.view = 'ok';
   renderShell();
   await rescan(true);
   if (sv === 'printer' && native && native.sync.printer && !S.bound) {
@@ -679,7 +685,7 @@ async function nativeSettings() {
 
     <div class="section-title">כללי</div>
     ${LANG_ROW()}
-    ${START_ROW(st.options.startView || 'last')}
+    ${START_ROW(st.options.startView || 'last') + MW_ROW(st.options.mwProfile)}
     <label class="chk"><input type="checkbox" id="oautoupd" ${st.options.autoUpdate !== false ? 'checked' : ''}> ${_t('לעדכן אוטומטית כשיש גרסה חדשה (בפתיחת האפליקציה)')}</label>
     <label class="chk"><input type="checkbox" id="onotify" ${st.options.notify ? 'checked' : ''}> התראה כשהדפסה מסתיימת או נכשלת</label>
     <div class="alert-opts">
@@ -721,6 +727,14 @@ async function nativeSettings() {
     if (lang && lang !== getLang()) { await native.sync.setConfig({ options: { lang } }); location.reload(); return; }
     if (!quiet) toast(_t('ההגדרות נשמרו'));
   };
+  box.addEventListener('change', async (e) => {
+    if (e.target.id !== 'omwprof') return;
+    const v = e.target.value.trim();
+    try { await native.sync.setConfig({ options: { mwProfile: v } }); } catch (err) { toast(_t('השמירה נכשלה: ') + (err && err.message), true); return; }
+    st.options = { ...st.options, mwProfile: v };
+    S.mwProfile = v;
+    mwReset();
+  });
   box.addEventListener('click', async (e) => {
     const t = e.target;
     if (t === box || t.closest('[data-close]')) { box.remove(); return; }
@@ -734,19 +748,19 @@ async function nativeSettings() {
       const r = await native.sync.login({ email: $('#lemail', box).value.trim(), password: codeOnly ? '' : $('#lpass', box).value, region: $('#lregion', box).value, codeOnly });
       login = r.ok ? { step: 'form', msg: '' } : r.need ? { step: r.need, msg: r.need === 'code' ? _t('שלחנו קוד למייל שלך') : '' } : { step: 'form', msg: r.error || _t('ההתחברות נכשלה') };
       if (login.msg === _t('שלחנו קוד למייל שלך')) { toast(login.msg); login.msg = ''; }
-      if (r.ok) { await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…')); }
+      if (r.ok) { await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…')); mwReset(); }
       draw();
       return;
     }
     if (t.closest('[data-verify]')) {
       const r = await native.sync.verify({ step: login.step, code: $('#lcode', box).value.trim() });
-      if (r.ok) { login = { step: 'form', msg: '' }; await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…')); }
+      if (r.ok) { login = { step: 'form', msg: '' }; await save(true); st = await native.sync.getState(); printers = st.printers.map((p) => ({ ...p })); toast(_t('מחובר ל-Bambu. מייבא את היסטוריית ההדפסות…')); mwReset(); }
       else login.msg = r.error || _t('הקוד לא התקבל');
       draw();
       return;
     }
     if (t.closest('[data-back]')) { login = { step: 'form', msg: '' }; draw(); return; }
-    if (t.closest('[data-logout]')) { st = await native.sync.logout(); draw(); return; }
+    if (t.closest('[data-logout]')) { st = await native.sync.logout(); mwReset(); draw(); return; }
     if (t.closest('[data-syncnow]')) { native.sync.syncNow(); toast(_t('מסנכרן…')); return; }
     if (t.closest('[data-discover]')) {
       collect();
@@ -1047,7 +1061,7 @@ function renderShell() {
     if (kind === 'view') { S.view = val; S.tag = null; S.folder = null; lib.data.prefs = { ...(lib.data.prefs || {}), view: val }; lib.save(); }
     if (kind === 'tag') { S.tag = S.tag === val ? null : val; }
     if (kind === 'folder') { S.folder = S.folder === val ? null : val; }
-    if (kind === 'src') { S.src = S.src === val ? null : val; if (S.src && ['ok', 'fail', 'history', 'inbox'].includes(S.view)) S.view = 'all'; }
+    if (kind === 'src') { S.src = S.src === val ? null : val; if (S.src && ['ok', 'fail', 'history', 'inbox', 'mine'].includes(S.view)) S.view = 'all'; }
     renderAll();
   });
   $('#grid').addEventListener('click', onGridClick);
@@ -1058,6 +1072,9 @@ function renderShell() {
   $('#toolbar').addEventListener('click', (e) => {
     if (e.target.closest('[data-clear]')) { if (S.tag || S.folder != null) S.view = 'all'; S.tag = null; S.folder = null; S.src = null; S.q = ''; $('#q').value = ''; renderAll(); }
     if (e.target.closest('[data-archiveall]')) archiveModels(toArchive());
+    if (e.target.closest('[data-mwrefresh]')) loadMine(true);
+    const mp = e.target.closest('[data-mwurl]');
+    if (mp) native.openUrl(mp.dataset.mwurl);
   });
 
   // drag & drop import
@@ -1147,7 +1164,7 @@ function renderSidebar() {
     ${fv.map(nav).join('')}
     ${srcNav(models)}
     ${!S.internalLib && folderList.filter(([d]) => !d.startsWith('@')).length > 1 ? folderList.filter(([d]) => !d.startsWith('@')).map(([d, c]) => `<button class="nav-item sub ${S.folder === d ? 'active' : ''}" data-nav="folder" data-val="${esc(d)}">${I.folder}<span class="lbl">${esc(fname(d))}</span><span class="count">${c}</span></button>`).join('') : ''}
-    ${tags.size ? _t`<h4>תגיות</h4>${[...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], loc())).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('')}` : ''}
+    ${mineNav(nav) + (tags.size ? _t`<h4>תגיות</h4>${[...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], loc())).map(([t, c]) => `<button class="nav-item ${S.tag === t ? 'active' : ''}" data-nav="tag" data-val="${esc(t)}"><span class="dot" style="background:hsl(${hueFor(t)} 65% 52%)"></span><span class="lbl">${esc(t)}</span><span class="count">${c}</span></button>`).join('')}` : '')}
   `;
 }
 
@@ -1500,8 +1517,9 @@ function renderToolbar() {
   const inbox = S.view === 'inbox' && !S.tag && S.folder == null;
   const hist = S.view === 'history' && !S.tag && S.folder == null;
   const itemsView = (S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null;
+  if (isMineView()) { renderMineToolbar(); return; }
   const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : itemsView ? printItems().filter((it) => (S.view === 'ok' ? it.n.ok : it.n.fail + it.n.cancel + it.n.partial)).length : filtered().length;
-  const title = (S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || _t('תיקייה ראשית')) : { all: _t('כל הקבצים'), fav: _t('מועדפים'), ok: _t('הדפסות שהצליחו'), fail: _t('הדפסות שנכשלו'), never: _t('עוד לא הודפסו'), versions: _t('עם כמה גרסאות'), inbox: _t('הדפסות לא משויכות'), history: _t('כל ההדפסות') }[S.view]) + (S.src && !inbox && !hist && !itemsView ? ' · ' + SRC[S.src][0] : '');
+  const title = (S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || _t('תיקייה ראשית')) : { all: _t('כל הקבצים'), fav: _t('מועדפים'), ok: _t('הדפסות שהצליחו'), fail: _t('הדפסות שנכשלו'), never: _t('עוד לא הודפסו'), versions: _t('עם כמה גרסאות'), inbox: _t('הדפסות לא משויכות'), history: _t('כל ההדפסות'), mine: _t('המודלים שלי ב-MakerWorld') }[S.view]) + (S.src && !inbox && !hist && !itemsView ? ' · ' + SRC[S.src][0] : '');
   $('#toolbar').innerHTML = `
     <span class="title">${esc(title)}</span><span>${n} ${inbox || hist ? _t('הדפסות') : itemsView ? _t('פריטים') : _t('קבצים')}</span>
     ${S.tag || S.folder != null || S.src || S.q ? _t('<button class="btn small ghost" data-clear>נקה סינון</button>') : ''}
@@ -1621,6 +1639,7 @@ function renderGrid() {
   if (S.view === 'inbox' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderInbox(); return; }
   if (S.view === 'history' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderHistory(); return; }
   if ((S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null) { renderItems(S.view); return; }
+  if (isMineView()) { renderMine(); return; }
   const list = filtered();
   const entries = gridEntries(list);
   S.visible = list.map((m) => m.id);
@@ -1637,6 +1656,118 @@ function renderGrid() {
     const p = M.cur(m).path;
     if (M.rec(p).thumb && !lib.thumbURLs.has(plate ? p + '#' + plate.id : p)) refreshThumb(p);
   }
+}
+
+/* ================= my MakerWorld models (designs the user published) ================= */
+const isMineView = () => S.view === 'mine' && !S.tag && S.folder == null && !!(native && native.makerworld);
+const mwOk = () => !!(S.mw && S.mw.res && S.mw.res.ok);
+// the view reloads the next time it is shown (or now, when it is open)
+// S.mwGen goes up on every reset, so an answer that was already on its way for the old user is dropped
+function mwReset() { S.mw = null; S.mwGen = (S.mwGen || 0) + 1; if (!lib || !$('#side')) return; renderSidebar(); if (isMineView()) { renderToolbar(); renderGrid(); } }
+async function loadMine(refresh) {
+  if (!native || !native.makerworld || (S.mw && S.mw.loading)) return;
+  const gen = S.mwGen || 0;
+  S.mw = { loading: true, res: S.mw && S.mw.res };
+  if (isMineView()) { renderToolbar(); renderGrid(); }
+  let res;
+  try { res = await native.makerworld.mine({ refresh: !!refresh }); } catch { res = null; }
+  if (gen !== (S.mwGen || 0)) return;
+  S.mw = { loading: false, res: res || { ok: false, code: 'network' } };
+  renderSidebar();
+  if (isMineView()) { renderToolbar(); renderGrid(); }
+}
+function mineNav(nav) {
+  if (!native || !native.makerworld) return '';
+  return `<h4>MakerWorld</h4>${nav(['mine', _t('המודלים שלי'), I.cube, mwOk() ? S.mw.res.designs.length : ''])}`;
+}
+function mineList() {
+  if (!mwOk()) return [];
+  const terms = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const t = (d) => Date.parse(d.published || '') || 0;
+  return (S.mw.res.designs || [])
+    .filter((d) => { const hay = [d.title, ...(d.tags || [])].join(' ').toLowerCase(); return terms.every((x) => hay.includes(x)); })
+    .sort((a, b) => t(b) - t(a));
+}
+// how many times the user printed each design (cloud prints carry designId; instances match by profileId)
+function myPrintCounts() {
+  const byDesign = new Map(), byProfile = new Map();
+  for (const e of (S.sync && S.sync.prints) || []) {
+    if (e.designId && String(e.designId) !== '0') byDesign.set(String(e.designId), (byDesign.get(String(e.designId)) || 0) + 1);
+    else if (e.profileId && String(e.profileId) !== '0') byProfile.set(String(e.profileId), (byProfile.get(String(e.profileId)) || 0) + 1);
+  }
+  return (d) => (byDesign.get(String(d.id)) || 0) + (d.instances || []).reduce((a, i) => a + (byProfile.get(String(i.profileId)) || 0), 0);
+}
+function renderMineToolbar() {
+  const ok = mwOk(), loading = S.mw && S.mw.loading;
+  const r = ok ? S.mw.res : null;
+  $('#toolbar').innerHTML = `
+    <span class="title">${_t('המודלים שלי ב-MakerWorld')}</span>${ok ? `<span>${mineList().length} ${_t('מודלים')}</span>` : ''}
+    ${S.q ? _t('<button class="btn small ghost" data-clear>נקה סינון</button>') : ''}
+    <span id="prog" class="progress"></span>
+    <span class="spacer" style="flex:1"></span>
+    ${r && r.profileUrl ? `<button class="btn small ghost" data-mwurl="${esc(r.profileUrl)}">${I.ext}${_t('פתח את הפרופיל')}</button>` : ''}
+    <button class="btn small" data-mwrefresh ${loading ? 'disabled' : ''}>${loading ? '<span class="spin" style="width:12px;height:12px"></span>' : I.refresh}${_t('רענן')}</button>`;
+  if (S.progress) setProgress(S.progress.label, S.progress.frac);
+}
+const fmtCount = (n) => { try { return new Intl.NumberFormat(loc(), { notation: 'compact', maximumFractionDigits: 1 }).format(+n || 0); } catch { return String(+n || 0); } };
+function mineCardHTML(d, printed) {
+  const stat = (ic, n, title) => `<span class="mwstat" title="${esc(title)}">${ic}${fmtCount(n)}</span>`;
+  return `<div class="card mw" data-mwurl="${esc(d.url || '')}" title="${esc(d.title || '')}">
+    <div class="thumbwrap"><div class="thumb">${d.cover ? `<img src="${esc(d.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : `<div class="ph">${I.cube}</div>`}</div></div>
+    <div class="badges">${printed ? `<span class="badge accent">${_t`הדפסת ×${printed}`}</span>` : ''}${d.makerLab ? '<span class="badge">MakerLab</span>' : ''}</div>
+    <div class="body">
+      <div class="name">${esc(d.title || _t('ללא שם'))}</div>
+      <div class="sub mwstats">${stat(I.download, d.downloads, _t('הורדות'))}${stat(I.printer, d.prints, _t('הדפסות'))}${stat(I.heart, d.likes, _t('לייקים'))}${stat(I.bookmark, d.collections, _t('שמירות לאוסף'))}</div>
+    </div>
+  </div>`;
+}
+function renderMine() {
+  const g = $('#grid');
+  g.classList.remove('selecting');
+  S.visible = [];
+  if (!S.mw) { loadMine(false); return; }
+  // background syncs re-render the grid: don't wipe a profile link the user is typing
+  if (S.mwShown === S.mw && document.activeElement && document.activeElement.id === 'mwprof') return;
+  S.mwShown = S.mw;
+  const r = S.mw.res;
+  const box = (inner) => `<div class="empty mwstate" style="grid-column:1/-1">${inner}</div>`;
+  if (!r) { g.innerHTML = box(`<div class="spin" style="margin:0 auto 12px"></div>${_t('טוען את המודלים שלך מ-MakerWorld…')}`); return; }
+  const who = (title, text) => box(`<b>${title}</b><div>${text}</div>
+    <div class="mwform"><input class="inp ltr" id="mwprof" value="${esc(S.mwProfile || '')}" placeholder="https://makerworld.com/en/@user_…"><button class="btn primary" data-mwsave>${_t('שמור')}</button></div>
+    <div style="margin-top:10px"><button class="btn" data-mwlogin>${_t('התחבר ל-Bambu בהגדרות')}</button></div>`);
+  if (!r.ok) {
+    if (r.code === 'no-user') g.innerHTML = who(_t('צריך לדעת מי אתה ב-MakerWorld'), _t('התחבר לחשבון Bambu בהגדרות, או הדבק כאן את הקישור לפרופיל שלך ב-MakerWorld:'));
+    else if (r.code === 'custom-handle') g.innerHTML = who(_t('עוד אי אפשר לזהות שם פרופיל מותאם אישית'), _t('התחבר לחשבון Bambu בהגדרות, או הדבק את הקישור לפרופיל שמסתיים ב-@user_ ומספר:'));
+    else g.innerHTML = box(`<b>${_t('לא הצלחנו להגיע ל-MakerWorld')}</b><div>${_t('בדוק את החיבור לאינטרנט ונסה שוב.')}${r.status ? ` (${esc(r.status)})` : ''}</div><div style="margin-top:12px"><button class="btn" data-mwrefresh>${I.refresh}${_t('נסה שוב')}</button></div>`);
+    const inp = $('#mwprof', g);
+    if (inp) inp.onkeydown = (e) => { if (e.key === 'Enter') saveMwProfile(inp.value); };
+    return;
+  }
+  if (!(r.designs || []).length) {
+    g.innerHTML = box(`<b>${_t('עוד לא פרסמת מודלים ב-MakerWorld')}</b>${r.profileUrl ? `<div style="margin-top:12px"><button class="btn" data-mwurl="${esc(r.profileUrl)}">${I.ext}${_t('פתח את הפרופיל')}</button></div>` : ''}`);
+    return;
+  }
+  const list = mineList();
+  if (!list.length) { g.innerHTML = _t`<div class="empty" style="grid-column:1/-1"><b>אין תוצאות</b>נסה חיפוש אחר או נקה את הסינון.</div>`; return; }
+  const printed = myPrintCounts();
+  g.innerHTML = list.map((d) => mineCardHTML(d, printed(d))).join('');
+}
+async function saveMwProfile(v) {
+  v = String(v || '').trim();
+  try { await native.sync.setConfig({ options: { mwProfile: v } }); } catch (e) { toast(_t('השמירה נכשלה: ') + (e && e.message), true); return; }
+  S.mwProfile = v;
+  S.mw = null; S.mwGen = (S.mwGen || 0) + 1;
+  loadMine(true);
+}
+// true when the click was handled here
+function onMineClick(e) {
+  const t = e.target;
+  if (t.closest('[data-mwsave]')) { saveMwProfile(($('#mwprof') || {}).value); return true; }
+  if (t.closest('[data-mwlogin]')) { printerDialog(); return true; }
+  if (t.closest('[data-mwrefresh]')) { loadMine(true); return true; }
+  const u = t.closest('[data-mwurl]');
+  if (u) { if (u.dataset.mwurl) native.openUrl(u.dataset.mwurl); return true; }
+  return !!t.closest('.mwstate');
 }
 
 function quickLog(m, result, forPlate) {
@@ -1658,6 +1789,7 @@ function quickLog(m, result, forPlate) {
 
 function onGridClick(e) {
   if (e.target.closest('.inbox')) { onInboxClick(e); return; }
+  if (isMineView() && onMineClick(e)) return;
   const cb = e.target.closest('[data-cloud]');
   if (cb) { e.stopPropagation(); onCloudBtn(cb.dataset.cloud); return; }
   const tl = e.target.closest('[data-tl]');
