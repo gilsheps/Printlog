@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { Engine, discover } = require('./engine');
 const { GDrive } = require('./gdrive');
+const makerworld = require('./makerworld');
 const { _t, setLang, getLang } = require('./i18n');
 
 // Internal name stays 'Model Shelf' on purpose: settings and the encrypted Bambu sign-in are
@@ -351,7 +352,8 @@ open "$1"
     return { ok: true };
   } catch (e) { return { ok: false, error: e.code === 'EACCES' ? _t('אין הרשאה להחליף את האפליקציה בתיקייה הזו') : e.message }; }
 });
-ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/(github\.com|e\.bambulab\.com)\//.test(url)) shell.openExternal(url); });
+ipcMain.handle('app:open', (_e, url) => { if (/^https:\/\/(github\.com|e\.bambulab\.com|makerworld\.com|makerworld\.com\.cn)\//.test(url)) shell.openExternal(url); });
+ipcMain.handle('mw:mine', (_e, o) => makerworld.mine(cfg(), { refresh: !!(o && o.refresh) }));
 
 /* ---------------- window, tray, notifications */
 function iconPath(name) { return path.join(__dirname, 'assets', name); }
