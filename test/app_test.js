@@ -31,7 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   await new Promise((r) => srv.listen(8883, '127.0.0.1', r));
-  const app = await electron.launch({ args: [path.join(__dirname, '..'), '--no-sandbox'], env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config') } });
+  const app = await electron.launch({ args: [path.join(__dirname, '..'), '--no-sandbox'], env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), PRINTLOG_TEST_USERDATA: userData } }); // macOS/Windows ignore XDG: pin the throwaway profile
   app.process().stdout.on('data', (d) => process.stdout.write('[main] ' + d));
   app.process().stderr.on('data', (d) => { const s = String(d); if (!/dbus|Fontconfig|GPU|gles|viz|ERROR:.*(bus|zygote)/i.test(s)) process.stdout.write('[err] ' + s.slice(0, 300)); });
   const win = await app.firstWindow();
@@ -51,17 +51,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: SHOTS + '/a2_after.png' });
   await win.click('#ppill');
   await sleep(500);
+  await win.screenshot({ path: SHOTS + '/a3_printer.png' });
+  // with a connected printer the pill opens the printer screen; its gear button opens the connection settings
+  await win.click('[data-psettings]');
+  await sleep(500);
   await win.screenshot({ path: SHOTS + '/a3_settings.png' });
   await win.click('[data-mode="cloud"]');
   await sleep(300);
   await win.screenshot({ path: SHOTS + '/a4_settings_cloud.png' });
-  // login attempt (network is blocked here -> should show a friendly error)
-  await win.fill('#lemail', 'test@example.com');
-  await win.fill('#lpass', 'x');
-  await win.click('[data-login]');
-  await sleep(4000);
-  console.log('login msg:', await win.evaluate(() => (document.querySelector('.settings .notice') || {}).textContent));
-  await win.screenshot({ path: SHOTS + '/a5_login_err.png' });
+  // login attempt with a fake account: it reaches the real Bambu cloud unless the network is blocked,
+  // so it only runs when asked (PRINTLOG_TEST_LOGIN=1). Expected: a friendly error message.
+  if (process.env.PRINTLOG_TEST_LOGIN === '1') {
+    await win.fill('#lemail', 'test@example.com');
+    await win.fill('#lpass', 'x');
+    await win.click('[data-login]');
+    await sleep(4000);
+    console.log('login msg:', await win.evaluate(() => (document.querySelector('.settings .notice') || {}).textContent));
+    await win.screenshot({ path: SHOTS + '/a5_login_err.png' });
+  } else console.log('login step skipped (set PRINTLOG_TEST_LOGIN=1 to run it)');
   await app.close().catch(() => {});
   srv.close();
   process.exit(0);
