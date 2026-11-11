@@ -22,15 +22,15 @@ jobs:
           - os: macos-latest
             target: --mac --arm64
             label: mac-arm64
-            go2rtc: go2rtc_mac_arm64
+            go2rtc: go2rtc_mac_arm64.zip
           - os: macos-latest
             target: --mac --x64
             label: mac-x64
-            go2rtc: go2rtc_mac_amd64
+            go2rtc: go2rtc_mac_amd64.zip
           - os: windows-latest
             target: --win
             label: windows
-            go2rtc: go2rtc_win64.exe
+            go2rtc: go2rtc_win64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -56,10 +56,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p build/go2rtc
-          asset="${{ matrix.go2rtc }}"
-          out="build/go2rtc/go2rtc"; [ "${asset##*.}" = "exe" ] && out="build/go2rtc/go2rtc.exe"
-          curl -fsSL -o "$out" "https://github.com/AlexxIT/go2rtc/releases/download/v1.9.15/$asset"
-          chmod +x "$out" || true
+          curl -fsSL -o /tmp/go2rtc.zip "https://github.com/AlexxIT/go2rtc/releases/download/v1.9.15/${{ matrix.go2rtc }}"
+          unzip -o /tmp/go2rtc.zip -d build/go2rtc
+          chmod +x build/go2rtc/go2rtc* || true
           ls -l build/go2rtc
       - name: Package
         shell: bash
