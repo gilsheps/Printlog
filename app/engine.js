@@ -326,7 +326,7 @@ class LiveWatcher {
   }
   onReport(payload) {
     // everything the printer reports (temperatures, AMS, fans, errors…) for the printer screen
-    if (payload && payload.info && Array.isArray(payload.info.module)) this.modules = payload.info.module.map((m) => ({ name: m.name, sw: m.sw_ver || '', hw: m.hw_ver || '', sn: m.sn || '' }));
+    if (payload && payload.info && Array.isArray(payload.info.module)) this.modules = payload.info.module.map((m) => ({ name: m.name, sw: m.sw_ver || '', hw: m.hw_ver || '', sn: m.sn || '', product: m.product_name || '', project: m.project_name || '' }));
     const p = payload && payload.print;
     if (!p || typeof p !== 'object') return;
     this.full = mergeDeep(this.full || {}, p);

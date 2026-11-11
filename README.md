@@ -35,7 +35,7 @@ After the first install, PrintLog updates itself — when a new version is out, 
 - A **printer screen** (click the printer's name): live job progress, temperatures, AMS slots with colors and remaining filament, fans, error codes (with a link to Bambu's explanation), firmware versions, and print statistics
 
 **Live camera (LAN)**
-- Watch the printer's camera live, on your local network, for every model — RTSP printers (P1 / A1 / P2 / X1 / H2D) and the X1 chamber view are both supported. PrintLog detects which your printer uses automatically. (Remote viewing over the internet, like the phone app, relies on Bambu's closed cloud relay and isn't part of PrintLog.)
+- Watch the printer's camera live, on your local network, for every model. PrintLog detects which method your printer uses automatically, the same way Home Assistant does: the **A1 / P1** family streams the JPEG chamber image (needs only the IP and Access Code), while **P2 / X1 / H2 / X2** stream RTSP video — for those you must turn on **LAN Liveview** in the printer's own settings first (exactly as Home Assistant requires). (Remote viewing over the internet, like the phone app, relies on Bambu's closed cloud relay and isn't part of PrintLog.)
 
 **Notifications**
 - Print finished or failed, print paused or errored (with the HMS code), first layer done, 10 minutes remaining, and AMS filament running low / high humidity — each one toggleable
