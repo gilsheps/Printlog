@@ -43,8 +43,14 @@ const close = (a, b, ms) => { const x = parseT(a), y = parseT(b); return x != nu
 const normT = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const colorHex = (c) => { c = String(c || '').replace('#', ''); return c.length >= 6 ? '#' + c.slice(0, 6).toUpperCase() : ''; };
 
-class CloudError extends Error {}
+class CloudError extends Error { constructor(msg, cf = false) { super(msg); this.cf = cf; } }
 class AuthExpired extends CloudError {}
+
+// Shared throttle + Cloudflare cool-down for every Bambu cloud call, so a burst
+// (e.g. the background model prefetch) doesn't trip Cloudflare's rate limit.
+const cloudGate = { chain: Promise.resolve(), lastAt: 0, blockedUntil: 0, backoff: 0 };
+const REQ_GAP_MS = 350; // minimum spacing between Bambu requests
+const nextBackoff = (prev) => Math.min((prev || 15000) * 2, 300000); // 30s, 60s, … capped at 5min
 
 /* ---------------------------------------------------------------- cloud */
 class BambuCloud {
@@ -65,6 +71,22 @@ class BambuCloud {
     return h;
   }
   async req(method, url, body, headers, allow400 = false) {
+    // One Bambu call at a time, spaced out, and honoring an active Cloudflare cool-down.
+    const prev = cloudGate.chain;
+    let release;
+    cloudGate.chain = new Promise((r) => (release = r));
+    try {
+      await prev.catch(() => {});
+      if (cloudGate.blockedUntil && Date.now() < cloudGate.blockedUntil) {
+        throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'), true);
+      }
+      const since = Date.now() - cloudGate.lastAt;
+      if (since < REQ_GAP_MS) await new Promise((r) => setTimeout(r, REQ_GAP_MS - since));
+      cloudGate.lastAt = Date.now();
+      return await this._req(method, url, body, headers, allow400);
+    } finally { release(); }
+  }
+  async _req(method, url, body, headers, allow400 = false) {
     let r, txt;
     try {
       r = await fetch(url, { method, headers: headers || this.headers(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(25000) });
@@ -72,10 +94,14 @@ class BambuCloud {
     } catch (e) { throw new CloudError(_t`אין חיבור לענן של Bambu (${e.cause?.code || e.message})`); }
     let j = {};
     try { j = txt ? JSON.parse(txt) : {}; } catch { }
-    if (r.ok) return { status: r.status, json: j, res: r };
+    if (r.ok) { cloudGate.blockedUntil = 0; cloudGate.backoff = 0; return { status: r.status, json: j, res: r }; }
     const cf = /cloudflare/i.test(txt);
     if (r.status === 401 || (r.status === 403 && !cf && this.token)) throw new AuthExpired(_t('Bambu דחו את החיבור השמור. צריך להתחבר מחדש בהגדרות.'));
-    if (r.status === 403 && cf) throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'));
+    if (r.status === 403 && cf) {
+      cloudGate.backoff = nextBackoff(cloudGate.backoff);
+      cloudGate.blockedUntil = Date.now() + cloudGate.backoff;
+      throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'), true);
+    }
     if (r.status === 400 && allow400) return { status: 400, json: j, res: r };
     throw new CloudError(_t`שגיאה מהענן (HTTP ${r.status})`);
   }
@@ -821,6 +847,7 @@ class Engine {
   async runQueue() {
     if (this.queueBusy) return;
     this.queueBusy = true;
+    let cfPauses = 0;
     try {
       while (this.queue.length) {
         const key = this.queue.shift();
@@ -830,8 +857,19 @@ class Engine {
         try {
           const r = await this.fetchModel(key, (got, total) => this.onModel({ key, state: 'dl', p: total ? got / total : null, got, total }));
           this.onModel({ key, state: 'done', path: r.path });
+          cfPauses = 0;
           if (!r.reused) await new Promise((res) => setTimeout(res, 1200)); // be gentle with Bambu's servers
         } catch (err) {
+          if (err && err.cf) {
+            // Cloudflare throttle — don't burn a retry; requeue and wait out the cool-down.
+            this.queue.unshift(key);
+            this.onModel({ key, state: 'dl', p: null });
+            if (++cfPauses > 6) { this.log('model: cloudflare still blocking, pausing queue until next refresh'); break; }
+            const waitMs = Math.max(2000, (cloudGate.blockedUntil || 0) - Date.now());
+            this.log(`model: cloudflare cool-down, waiting ${Math.round(waitMs / 1000)}s`);
+            await new Promise((res) => setTimeout(res, waitMs));
+            continue;
+          }
           e.modelTries = (e.modelTries || 0) + 1; e.modelError = err.message;
           this.out.write(true);
           this.log(`model: ${key} failed (${err.message})`);
@@ -897,4 +935,4 @@ class Engine {
   }
 }
 
-module.exports = { probeTls, lanIfaces, Engine, BambuCloud, Output, LiveWatcher, MiniMQTT, startMqtt, discover, taskToEntry, CloudError, AuthExpired };
+module.exports = { probeTls, lanIfaces, Engine, BambuCloud, Output, LiveWatcher, MiniMQTT, startMqtt, discover, taskToEntry, CloudError, AuthExpired, nextBackoff };
