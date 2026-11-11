@@ -80,7 +80,16 @@
       "category": "Utility",
       "artifactName": "PrintLog-${version}-linux.${ext}"
     },
-    "afterPack": "build/adhoc-sign.js"
+    "afterPack": "build/adhoc-sign.js",
+    "extraResources": [
+      {
+        "from": "build/go2rtc",
+        "to": "go2rtc",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   },
   "repository": {
     "type": "git",

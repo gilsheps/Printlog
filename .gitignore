@@ -10,3 +10,4 @@ helper/test_*.py
 .DS_Store
 __pycache__/
 app/oauth.json
+build/go2rtc/

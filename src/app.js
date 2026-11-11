@@ -13,6 +13,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const I = {
+  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
   cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.6 11 4 4 0 0 1 17.5 19z"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
   // card badges: downloaded from Bambu Cloud / in Google Drive / can be uploaded to Drive
@@ -441,17 +442,52 @@ async function printerScreen(serial) {
   let cur = serial || (list.find((p) => ['running', 'pause', 'prepare'].includes((S.sync.printers[p.serial] || {}).state)) || list[0]).serial;
   const d = document.createElement('div');
   d.className = 'dialog';
-  d.innerHTML = _t`<div class="box printer-screen"><div class="ps-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-body"><div class="spin"></div></div></div>`;
+  d.innerHTML = _t`<div class="box printer-screen"><div class="ps-head"><h3 data-pname></h3><div class="pr-tabs"></div><button class="btn small ghost" data-psettings>${I.gear}הגדרות</button><button class="btn icon-btn ghost" data-close>${I.close}</button></div><div class="pr-cam" data-cam></div><div class="pr-body"><div class="spin"></div></div></div>`;
   document.body.appendChild(d);
   let timer = null;
   const close = () => { clearInterval(timer); d.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
+  const cam = { serial: null, playing: false, kind: '' };
+  const camEl = () => $('[data-cam]', d);
+  const stopCam = () => {
+    if (cam.serial) { native.sync.cameraStop(cam.serial); cam.serial = null; cam.playing = false; }
+  };
+  const renderCamIdle = (info) => {
+    const el = camEl(); if (!el) return;
+    const lan = info && info.conn === 'lan';
+    el.className = 'pr-cam';
+    el.innerHTML = lan
+      ? _t`<button class="cam-start" data-camstart>${I.camera || I.printer}<span>הצג מצלמה</span></button>`
+      : _t`<div class="cam-note">${I.camera || I.printer}<span>${info && info.conn === 'cloud' ? _t('המצלמה זמינה רק בחיבור רשת ביתית (LAN) למדפסת') : _t('המצלמה מוצגת כשהמדפסת מחוברת ברשת הביתית')}</span></div>`;
+  };
+  const startCam = async () => {
+    const el = camEl(); if (!el) return;
+    el.className = 'pr-cam live';
+    el.innerHTML = _t`<div class="cam-stage"><div class="spin"></div><span class="cam-msg">מתחבר למצלמה…</span></div><button class="cam-x" data-camstop title="${_t('סגור מצלמה')}">${I.close}</button>`;
+    const r = await native.sync.cameraStart(cur);
+    if (!el.isConnected || cam.serialPending !== cur) return;
+    if (!r.ok) { el.className = 'pr-cam'; el.innerHTML = _t`<div class="cam-note err">${tx(r.error) || _t('המצלמה לא זמינה')} <button class="btn small" data-camstart>${_t('נסה שוב')}</button></div>`; return; }
+    cam.serial = cur; cam.playing = true; cam.kind = r.kind;
+    const stage = $('.cam-stage', el);
+    if (r.kind === 'webrtc') stage.innerHTML = `<iframe class="cam-frame" allow="autoplay" src="${esc(r.url)}"></iframe>`;
+    else stage.innerHTML = `<img class="cam-img" alt="">`;
+    const tip = $('.cam-tip', el); if (tip) tip.remove();
+    el.insertAdjacentHTML('beforeend', _t`<div class="cam-tip">מסך שחור? ודא שהמצלמה דולקת, ושהמדפסת ב-LAN Only עם Developer Mode פעיל בהגדרות הרשת שלה.</div>`);
+  };
+  // one global route for X1 JPEG frames
+  if (native.sync.onCameraFrame && !window.__camHook) {
+    window.__camHook = (f) => {};
+    native.sync.onCameraFrame((f) => window.__camHook(f));
+  }
+  window.__camHook = (f) => { if (cam.playing && cam.kind === 'mjpeg' && f.serial === cam.serial) { const img = $('.cam-img', d); if (img) img.src = f.dataUrl; } };
+
   const draw = async () => {
     const info = await native.sync.printer(cur).catch(() => null);
     if (!d.isConnected) return;
     if (!info) { $('.pr-body', d).innerHTML = _t('<div class="hint">אין נתונים מהמדפסת.</div>'); return; }
     $('[data-pname]', d).textContent = info.name;
+    if (cam.renderedFor !== cur) { cam.renderedFor = cur; if (!cam.playing) renderCamIdle(info); }
     $('.pr-tabs', d).innerHTML = list.length > 1 ? list.map((p) => `<button class="btn small ${p.serial === cur ? 'on' : 'ghost'}" data-ptab="${esc(p.serial)}">${esc(p.name)}</button>`).join('') : '';
     const body = $('.pr-body', d);
     const top = body.scrollTop;
@@ -460,10 +496,12 @@ async function printerScreen(serial) {
   };
   d.addEventListener('click', (e) => {
     const t = e.target;
-    if (t === d || t.closest('[data-close]')) { close(); return; }
-    if (t.closest('[data-psettings]')) { close(); printerDialog(); return; }
+    if (t === d || t.closest('[data-close]')) { stopCam(); close(); return; }
+    if (t.closest('[data-camstart]')) { cam.serialPending = cur; startCam(); return; }
+    if (t.closest('[data-camstop]')) { stopCam(); cam.renderedFor = null; draw(); return; }
+    if (t.closest('[data-psettings]')) { stopCam(); close(); printerDialog(); return; }
     const tab = t.closest('[data-ptab]');
-    if (tab) { cur = tab.dataset.ptab; draw(); return; }
+    if (tab) { stopCam(); cam.renderedFor = null; cur = tab.dataset.ptab; draw(); return; }
     const h = t.closest('[data-hms]');
     if (h) { e.preventDefault(); native.openUrl(`https://e.bambulab.com/index.php?e=${h.dataset.hms.replace(/_/g, '')}&s=device_hms&lang=en`); }
   });

@@ -121,6 +121,22 @@ button{cursor:pointer}
 .ps-head h3{margin:0;flex:1;font-size:19px}
 .pr-tabs{display:flex;gap:6px}
 .ps-head svg{width:15px;height:15px}
+.pr-cam{padding:0 20px}
+.pr-cam:empty{display:none}
+.cam-start{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;padding:14px;border:1px solid var(--line2);border-radius:14px;background:var(--panel);color:var(--ink);font:inherit;font-weight:600;cursor:pointer;transition:border-color .12s,background .12s}
+.cam-start:hover{border-color:var(--accent)}
+.cam-start svg{width:20px;height:20px}
+.cam-note{display:flex;align-items:center;gap:10px;margin-top:14px;padding:12px 14px;border:1px dashed var(--line2);border-radius:12px;color:var(--ink2);font-size:13px}
+.cam-note.err{border-style:solid;border-color:color-mix(in srgb,var(--fail) 40%,var(--line));background:var(--fail-soft)}
+.cam-note svg{width:18px;height:18px;flex:none}
+.pr-cam.live{position:relative;margin-top:14px}
+.cam-stage{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.cam-frame{width:100%;height:100%;border:0;display:block;background:#000}
+.cam-img{width:100%;height:100%;object-fit:contain;background:#000}
+.cam-msg{position:absolute;color:#fff;font-size:13px;opacity:.85;margin-top:40px}
+.cam-x{position:absolute;top:8px;inset-inline-end:28px;z-index:3;width:30px;height:30px;border-radius:8px;border:0;background:rgba(0,0,0,.55);color:#fff;cursor:pointer;display:grid;place-items:center}
+.cam-x svg{width:16px;height:16px}
+.cam-tip{font-size:12px;color:var(--ink3);margin-top:6px;text-align:center}
 .pr-body{overflow:auto;padding:16px 20px 20px;flex:1;min-height:0}
 .pr-sec{margin-top:18px}
 .pr-sec h4{margin:0 0 8px;font-size:12.5px;color:var(--ink3);font-weight:600;letter-spacing:.02em}

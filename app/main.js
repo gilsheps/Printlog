@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { Engine, discover } = require('./engine');
 const { GDrive } = require('./gdrive');
+const { Cameras } = require('./camera');
 const makerworld = require('./makerworld');
 const { _t, setLang, getLang } = require('./i18n');
 
@@ -16,6 +17,7 @@ if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
 const HAD_CFG = fs.existsSync(CFG_FILE); // existing users keep Hebrew; a new install follows the system language
 let win = null, tray = null, quitting = false, engine = null, lastSync = null;
+let cameras = null;
 
 /* ---------------- config (token encrypted with the OS keychain when possible) */
 function readCfg() {
@@ -250,6 +252,16 @@ ipcMain.handle('sync:openTimelapse', (_e, rel) => {
   return true;
 });
 ipcMain.handle('sync:printer', (_e, serial) => { try { return engine.printerDetail(serial); } catch { return null; } });
+ipcMain.handle('camera:available', () => !!(cameras && cameras.available()));
+ipcMain.handle('camera:start', async (_e, serial) => {
+  try {
+    if (!cameras || !cameras.available()) return { ok: false, error: _t('רכיב המצלמה חסר בגרסה הזו') };
+    const d = engine.printerDetail(serial);
+    const p = (cfg().printers || []).find((x) => x.serial === serial) || {};
+    return { ok: true, ...(await cameras.start({ ...d, accessCode: p.access_code })) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('camera:stop', (_e, serial) => { try { cameras && cameras.stop(serial); } catch {} return true; });
 ipcMain.handle('sync:prefetch', (_e, keys) => { try { if (!engine.out) engine.start(); return engine.prefetch(Array.isArray(keys) ? keys.slice(0, 5000) : []); } catch { return 0; } });
 ipcMain.handle('sync:modelsSize', () => {
   try { const d = path.join(cfg().library, '.shelf', 'models'); return fs.readdirSync(d).reduce((a, n) => a + (n.startsWith('.') ? 0 : fs.statSync(path.join(d, n)).size), 0); } catch { return 0; }
@@ -430,7 +442,7 @@ function applyLogin() {
 
 app.on('second-instance', showWindow);
 app.on('activate', showWindow);
-app.on('before-quit', () => { quitting = true; engine && engine.stop(); });
+app.on('before-quit', () => { quitting = true; engine && engine.stop(); cameras && cameras.stopAll(); });
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 
 function setAppMenu() {
@@ -459,6 +471,8 @@ app.whenReady().then(() => {
     onModel: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('model-progress', ev); },
     log: (m) => console.log(`[${new Date().toISOString()}] ${m}`),
   });
+  cameras = new Cameras({ appDir: __dirname, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, log: (m) => console.log(`[${new Date().toISOString()}] ${m}`) });
+  cameras.onFrame = (serial, dataUrl) => { if (win && !win.isDestroyed()) win.webContents.send('camera-frame', { serial, dataUrl }); };
   const hidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAsHidden;
   createWindow(!hidden);
   if (hidden && process.platform === 'darwin') app.dock?.hide();

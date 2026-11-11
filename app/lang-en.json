@@ -545,5 +545,19 @@
  "לא הצלחנו להגיע ל-MakerWorld": "Couldn’t reach MakerWorld",
  "בדוק את החיבור לאינטרנט ונסה שוב.": "Check your internet connection and try again.",
  "נסה שוב": "Try again",
- "עוד לא פרסמת מודלים ב-MakerWorld": "You haven’t published any models on MakerWorld yet"
+ "עוד לא פרסמת מודלים ב-MakerWorld": "You haven’t published any models on MakerWorld yet",
+ "<button class=\"cam-start\" data-camstart>{}<span>הצג מצלמה</span></button>": "<button class=\"cam-start\" data-camstart>{}<span>Show camera</span></button>",
+ "המצלמה זמינה רק בחיבור רשת ביתית (LAN) למדפסת": "The camera is only available over a local-network (LAN) connection to the printer",
+ "המצלמה מוצגת כשהמדפסת מחוברת ברשת הביתית": "The camera shows when the printer is connected over the local network",
+ "<div class=\"cam-note\">{}<span>{}</span></div>": "<div class=\"cam-note\">{}<span>{}</span></div>",
+ "<div class=\"cam-stage\"><div class=\"spin\"></div><span class=\"cam-msg\">מתחבר למצלמה…</span></div><button class=\"cam-x\" data-camstop title=\"{}\">{}</button>": "<div class=\"cam-stage\"><div class=\"spin\"></div><span class=\"cam-msg\">Connecting to the camera…</span></div><button class=\"cam-x\" data-camstop title=\"{}\">{}</button>",
+ "סגור מצלמה": "Close camera",
+ "המצלמה לא זמינה": "The camera is not available",
+ "<div class=\"cam-note err\">{} <button class=\"btn small\" data-camstart>{}</button></div>": "<div class=\"cam-note err\">{} <button class=\"btn small\" data-camstart>{}</button></div>",
+ "צריך חיבור ברשת הביתית למצלמה (IP וקוד גישה)": "The camera needs a local-network connection to the printer (IP and Access Code)",
+ "המצלמה כבויה בהגדרות המדפסת": "The camera is turned off in the printer settings",
+ "רכיב המצלמה חסר בגרסה הזו": "The camera component is missing from this build",
+ "go2rtc לא נענה": "The camera helper (go2rtc) didn't respond",
+ "<div class=\"box printer-screen\"><div class=\"ps-head\"><h3 data-pname></h3><div class=\"pr-tabs\"></div><button class=\"btn small ghost\" data-psettings>{}הגדרות</button><button class=\"btn icon-btn ghost\" data-close>{}</button></div><div class=\"pr-cam\" data-cam></div><div class=\"pr-body\"><div class=\"spin\"></div></div></div>": "<div class=\"box printer-screen\"><div class=\"ps-head\"><h3 data-pname></h3><div class=\"pr-tabs\"></div><button class=\"btn small ghost\" data-psettings>{}Settings</button><button class=\"btn icon-btn ghost\" data-close>{}</button></div><div class=\"pr-cam\" data-cam></div><div class=\"pr-body\"><div class=\"spin\"></div></div></div>",
+ "<div class=\"cam-tip\">מסך שחור? ודא שהמצלמה דולקת, ושהמדפסת ב-LAN Only עם Developer Mode פעיל בהגדרות הרשת שלה.</div>": "<div class=\"cam-tip\">Black screen? Make sure the camera is on, and that the printer is in LAN Only mode with Developer Mode enabled in its network settings.</div>"
 }
