@@ -98,5 +98,7 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" out/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrintLog $TAG" --generate-notes
+            PRE=""
+            [ "${{ github.event_name }}" = "workflow_dispatch" ] && PRE="--prerelease"
+            gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrintLog $TAG" --generate-notes $PRE
           fi
