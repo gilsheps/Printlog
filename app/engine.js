@@ -48,7 +48,7 @@ class AuthExpired extends CloudError {}
 
 // Shared throttle + Cloudflare cool-down for every Bambu cloud call, so a burst
 // (e.g. the background model prefetch) doesn't trip Cloudflare's rate limit.
-const cloudGate = { chain: Promise.resolve(), lastAt: 0, blockedUntil: 0, backoff: 0 };
+const cloudGate = { nextAt: 0, blockedUntil: 0, backoff: 0 };
 const REQ_GAP_MS = 350; // minimum spacing between Bambu requests
 const nextBackoff = (prev) => Math.min((prev || 15000) * 2, 300000); // 30s, 60s, … capped at 5min
 
@@ -71,25 +71,22 @@ class BambuCloud {
     return h;
   }
   async req(method, url, body, headers, allow400 = false) {
-    // One Bambu call at a time, spaced out, and honoring an active Cloudflare cool-down.
-    const prev = cloudGate.chain;
-    let release;
-    cloudGate.chain = new Promise((r) => (release = r));
-    try {
-      await prev.catch(() => {});
-      if (cloudGate.blockedUntil && Date.now() < cloudGate.blockedUntil) {
-        throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'), true);
-      }
-      const since = Date.now() - cloudGate.lastAt;
-      if (since < REQ_GAP_MS) await new Promise((r) => setTimeout(r, REQ_GAP_MS - since));
-      cloudGate.lastAt = Date.now();
-      return await this._req(method, url, body, headers, allow400);
-    } finally { release(); }
+    // Honor an active Cloudflare cool-down up front, fast.
+    if (cloudGate.blockedUntil && Date.now() < cloudGate.blockedUntil) {
+      throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'), true);
+    }
+    // Space out request STARTS so a burst doesn't trip Cloudflare — but never let
+    // a slow/stuck request block the ones behind it (no head-of-line waiting).
+    const now = Date.now();
+    const slot = Math.max(now, cloudGate.nextAt || 0);
+    cloudGate.nextAt = slot + REQ_GAP_MS;
+    if (slot > now) await new Promise((r) => setTimeout(r, slot - now));
+    return this._req(method, url, body, headers, allow400);
   }
   async _req(method, url, body, headers, allow400 = false) {
     let r, txt;
     try {
-      r = await fetch(url, { method, headers: headers || this.headers(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(25000) });
+      r = await fetch(url, { method, headers: headers || this.headers(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(12000) });
       txt = await r.text();
     } catch (e) { throw new CloudError(_t`אין חיבור לענן של Bambu (${e.cause?.code || e.message})`); }
     let j = {};
