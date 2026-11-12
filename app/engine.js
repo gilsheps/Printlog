@@ -62,9 +62,9 @@ class BambuCloud {
   }
   headers(auth = true) {
     const h = {
-      'User-Agent': 'bambu_network_agent/01.09.05.01', 'X-BBL-Client-Name': 'OrcaSlicer', 'X-BBL-Client-Type': 'slicer',
-      'X-BBL-Client-Version': '01.09.05.51', 'X-BBL-Language': 'en-US', 'X-BBL-OS-Type': 'linux', 'X-BBL-OS-Version': '6.2.0',
-      'X-BBL-Agent-Version': '01.09.05.01', 'X-BBL-Executable-info': '{}', 'X-BBL-Agent-OS-Type': 'linux',
+      'User-Agent': 'bambu_network_agent/02.06.00.51', 'X-BBL-Client-Name': 'BambuStudio', 'X-BBL-Client-Type': 'slicer',
+      'X-BBL-Client-Version': '02.06.00.51', 'X-BBL-Language': 'en-US', 'X-BBL-OS-Type': 'linux', 'X-BBL-OS-Version': '6.2.0',
+      'X-BBL-Agent-Version': '02.06.00.51', 'X-BBL-Executable-info': '{}', 'X-BBL-Agent-OS-Type': 'linux',
       Accept: 'application/json', 'Content-Type': 'application/json',
     };
     if (auth && this.token) h.Authorization = `Bearer ${this.token}`;
