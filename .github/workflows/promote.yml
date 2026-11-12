@@ -1,0 +1,23 @@
+name: Promote release
+
+# Flip an existing prerelease (built and tested via "Build app") into the
+# public, latest stable release — without rebuilding.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to promote to the latest stable release (e.g. v1.1.24)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark release as latest stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
