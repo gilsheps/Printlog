@@ -473,7 +473,10 @@ async function printerScreen(serial) {
     if (r.kind === 'webrtc') stage.innerHTML = `<iframe class="cam-frame" allow="autoplay" src="${esc(r.url)}"></iframe>`;
     else stage.innerHTML = `<img class="cam-img" alt="">`;
     const tip = $('.cam-tip', el); if (tip) tip.remove();
-    el.insertAdjacentHTML('beforeend', _t`<div class="cam-tip">מסך שחור? ודא שהמצלמה מופעלת בהגדרות המדפסת, ושהמחשב והמדפסת מחוברים לאותה רשת.</div>`);
+    const tipHtml = r.kind === 'webrtc'
+      ? _t`<div class="cam-tip">מסך שחור? הפעל "צפייה ברשת מקומית" (LAN Liveview) בהגדרות המדפסת, וודא שהמחשב והמדפסת מחוברים לאותה רשת.</div>`
+      : _t`<div class="cam-tip">מסך שחור? ודא שהמצלמה מופעלת בהגדרות המדפסת, ושהמחשב והמדפסת מחוברים לאותה רשת.</div>`;
+    el.insertAdjacentHTML('beforeend', tipHtml);
   };
   // one global route for X1 JPEG frames
   if (native.sync.onCameraFrame && !window.__camHook) {
