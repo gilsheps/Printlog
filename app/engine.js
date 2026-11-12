@@ -71,12 +71,10 @@ class BambuCloud {
     return h;
   }
   async req(method, url, body, headers, allow400 = false) {
-    // Honor an active Cloudflare cool-down up front, fast.
-    if (cloudGate.blockedUntil && Date.now() < cloudGate.blockedUntil) {
-      throw new CloudError(_t('נחסם זמנית על ידי Cloudflare. ננסה שוב מאוחר יותר.'), true);
-    }
-    // Space out request STARTS so a burst doesn't trip Cloudflare — but never let
-    // a slow/stuck request block the ones behind it (no head-of-line waiting).
+    // Space out request STARTS so a burst doesn't trip Cloudflare — but never block
+    // a request on an earlier one, and never fast-fail from a stale cool-down: a
+    // Cloudflare block surfaces per-request, so a transient one clears on the next
+    // success instead of sticking. (blockedUntil only paces the background queue.)
     const now = Date.now();
     const slot = Math.max(now, cloudGate.nextAt || 0);
     cloudGate.nextAt = slot + REQ_GAP_MS;
@@ -706,12 +704,22 @@ class Engine {
     let result;
     try {
       const n = await this.syncHistory(first);
+      this.cfMisses = 0;
       this.log(`cloud history: ${n} new`);
       result = { ok: true, added: n };
     } catch (e) {
       this.log(`cloud sync failed: ${e.message}`);
-      if (this.out) this.out.setHelper({ lastError: e.message, needsLogin: e instanceof AuthExpired });
-      next = e instanceof AuthExpired ? 6 * 3600000 : 300000;
+      if (e && e.cf) {
+        // A single transient Cloudflare block is common and clears by itself:
+        // retry soon, and only alarm the user if it actually persists.
+        this.cfMisses = (this.cfMisses || 0) + 1;
+        if (this.cfMisses >= 2 && this.out) this.out.setHelper({ lastError: e.message });
+        next = 60000;
+      } else {
+        this.cfMisses = 0;
+        if (this.out) this.out.setHelper({ lastError: e.message, needsLogin: e instanceof AuthExpired });
+        next = e instanceof AuthExpired ? 6 * 3600000 : 300000;
+      }
       result = { ok: false, error: e.message };
     }
     this.timer = setTimeout(() => this.loopHistory(false), next);
