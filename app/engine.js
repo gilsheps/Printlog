@@ -779,7 +779,7 @@ class Engine {
     const p = (cfg.printers || []).find((x) => x.serial === serial) || {};
     const w = this.watchers[serial];
     const st = this.out && this.out.data.printers[serial];
-    return { serial, name: p.name || serial, model: p.model || '', ip: p.ip || '', conn: w ? w.source : '', status: st || null, report: w ? w.full || null : null, reportAt: w ? w.fullAt || 0 : 0, modules: w ? w.modules || [] : [] };
+    return { serial, name: p.name || serial, model: p.model || '', ip: p.ip || '', cam: !!(p.ip && p.access_code), conn: w ? w.source : '', status: st || null, report: w ? w.full || null : null, reportAt: w ? w.fullAt || 0 : 0, modules: w ? w.modules || [] : [] };
   }
   // the same design printed many times is downloaded once
   static modelGroup(e) {

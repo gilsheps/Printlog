@@ -455,11 +455,11 @@ async function printerScreen(serial) {
   };
   const renderCamIdle = (info) => {
     const el = camEl(); if (!el) return;
-    const lan = info && info.conn === 'lan';
+    const canCam = info && info.cam;
     el.className = 'pr-cam';
-    el.innerHTML = lan
+    el.innerHTML = canCam
       ? _t`<button class="cam-start" data-camstart>${I.camera || I.printer}<span>הצג מצלמה</span></button>`
-      : _t`<div class="cam-note">${I.camera || I.printer}<span>${info && info.conn === 'cloud' ? _t('המצלמה זמינה רק בחיבור רשת ביתית (LAN) למדפסת') : _t('המצלמה מוצגת כשהמדפסת מחוברת ברשת הביתית')}</span></div>`;
+      : _t`<div class="cam-note">${I.camera || I.printer}<span>${_t('כדי לצפות במצלמה, הגדירו את המדפסת עם IP וקוד גישה (רשת ביתית), והפעילו את PrintLog באותה רשת')}</span></div>`;
   };
   const startCam = async () => {
     const el = camEl(); if (!el) return;
