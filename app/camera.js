@@ -199,7 +199,29 @@ class Cameras {
     const name = `cam_${serial.replace(/[^a-zA-Z0-9]/g, '')}`;
     await this.api('PUT', `/api/streams?name=${name}&src=${encodeURIComponent(url + '#timeout=30')}`);
     this.streams.add(name);
+    // go2rtc accepts any source; only a real pull shows whether the printer
+    // streams. Without this check a disabled liveview is a silent black player.
+    if (!(await this.probeStream(name))) {
+      await this.stop(serial);
+      throw new Error('המצלמה כבויה — הפעל צפייה ברשת מקומית (LAN Liveview) בהגדרות המדפסת');
+    }
     return { kind: 'webrtc', url: `http://127.0.0.1:${this.apiPort}/webrtc.html?src=${name}&media=video` };
+  }
+
+  // true once go2rtc delivers the first media bytes for this stream; false if it
+  // answers with an error (source unreachable / refused) or nothing in time.
+  probeStream(name, ms = 12000) {
+    return new Promise((res) => {
+      let done = false;
+      const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); try { req.destroy(); } catch {} res(ok); };
+      const req = http.get({ host: '127.0.0.1', port: this.apiPort, path: `/api/stream.mp4?src=${name}` }, (r) => {
+        if (r.statusCode !== 200) { r.resume(); return finish(false); }
+        r.once('data', () => finish(true));
+        r.on('end', () => finish(false));
+      });
+      req.on('error', () => finish(false));
+      const timer = setTimeout(() => finish(false), ms);
+    });
   }
 
   async stop(serial) {
