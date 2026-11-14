@@ -39,6 +39,15 @@ const OUT_NAME = 'printer-sync.json';
 
 const nowIso = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 const parseT = (s) => { const t = Date.parse(s || ''); return isNaN(t) ? null : t; };
+const isLive = (p) => p.source === 'lan-live' || p.source === 'cloud-live';
+// Bambu task id of a print record: cloud-<id>, or live-<serial>-<id> (live keys fall back to the start time)
+const taskOf = (p) => {
+  if (p.task && p.task !== '0') return String(p.task);
+  const k = String(p.key || '');
+  if (k.startsWith('cloud-')) return k.slice(6);
+  const m = /^live-.+-(\d+)$/.exec(k);
+  return m ? m[1] : '';
+};
 const close = (a, b, ms) => { const x = parseT(a), y = parseT(b); return x != null && y != null && Math.abs(x - y) <= ms; };
 const normT = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 const colorHex = (c) => { c = String(c || '').replace('#', ''); return c.length >= 6 ? '#' + c.slice(0, 6).toUpperCase() : ''; };
@@ -221,6 +230,8 @@ class Output {
     try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; if (d.idsVer) this.data.idsVer = d.idsVer; if (Array.isArray(d.timelapseSeen)) this.data.timelapseSeen = d.timelapseSeen; } catch { }
     this.data.helper = { version: 'app', app: true, mode, host: os.hostname(), started: nowIso() };
     this.lastWrite = 0; this.pending = false;
+    // older versions missed some matches and left a live duplicate next to the cloud record
+    for (const c of this.data.prints.filter((p) => p.source === 'cloud')) this.foldLive(c);
   }
   knownCloudIds() { return new Set(this.data.prints.filter((p) => (p.key || '').startsWith('cloud-')).map((p) => p.key.slice(6))); }
   setHelper(kw) { Object.assign(this.data.helper, kw); this.write(); }
@@ -230,21 +241,40 @@ class Output {
   }
   samePrint(a, b) {
     if (a.serial !== b.serial) return false;
+    // Bambu's task id is shared by the cloud record and the live one. It is the
+    // only reliable link when the app joined mid-print or saw FINISH hours late
+    // (Mac asleep): then the live start/end times are far off.
+    const ta = taskOf(a), tb = taskOf(b);
+    if (ta && ta === tb) return true;
     if (close(a.start, b.start, 20 * 60000)) return true;
     return !!normT(a.title) && normT(a.title) === normT(b.title) && close(a.end, b.end, 20 * 60000);
   }
   addPrint(e) {
     const P = this.data.prints;
     const i = P.findIndex((p) => p.key === e.key);
-    if (i >= 0) { P[i] = { ...P[i], ...e }; return false; }
+    if (i >= 0) { P[i] = { ...P[i], ...e }; this.foldLive(P[i]); return false; }
     if (e.source === 'cloud') {
-      const j = P.findIndex((p) => (p.source === 'lan-live' || p.source === 'cloud-live') && this.samePrint(p, e));
-      if (j >= 0) { e.aliasKeys = [...new Set([...(P[j].aliasKeys || []), P[j].key])]; if (P[j].timelapse) e.timelapse = P[j].timelapse; P[j] = e; return false; }
+      const j = P.findIndex((p) => isLive(p) && this.samePrint(p, e));
+      if (j >= 0) { e.aliasKeys = [...new Set([...(P[j].aliasKeys || []), P[j].key])]; if (P[j].timelapse) e.timelapse = P[j].timelapse; P[j] = e; this.foldLive(e); return false; }
     } else if (P.some((p) => p.source === 'cloud' && this.samePrint(p, e))) return false;
     P.push(e);
     P.sort((a, b) => (b.start || '').localeCompare(a.start || ''));
     P.length = Math.min(P.length, 8000);
     return true;
+  }
+  // merge every live record of this cloud print into it (keeps their keys as aliases)
+  foldLive(c) {
+    if (!c || c.source !== 'cloud') return 0;
+    const P = this.data.prints;
+    let n = 0;
+    for (let j = P.length - 1; j >= 0; j--) {
+      const p = P[j];
+      if (p === c || !isLive(p) || !this.samePrint(p, c)) continue;
+      c.aliasKeys = [...new Set([...(c.aliasKeys || []), ...(p.aliasKeys || []), p.key])];
+      if (p.timelapse && !c.timelapse) c.timelapse = p.timelapse;
+      P.splice(j, 1); n++;
+    }
+    return n;
   }
   write(throttle = false) {
     if (throttle && Date.now() - this.lastWrite < 15000) { this.pending = true; return; }
@@ -368,7 +398,7 @@ class LiveWatcher {
       const a = this.active;
       const e = {
         key: `live-${this.serial}-${a.task && a.task !== '0' ? a.task : a.start}`, source: this.source === 'lan' ? 'lan-live' : 'cloud-live',
-        serial: this.serial, printer: this.name, title: a.job || job, design: '', file: a.file, plate: 0,
+        serial: this.serial, printer: this.name, title: a.job || job, design: '', file: a.file, plate: 0, task: a.task && a.task !== '0' ? a.task : '',
         result: st === 'FINISH' ? 'ok' : 'fail', start: a.start, end: nowIso(),
         minutes: Math.round((Date.now() - (parseT(a.start) || Date.now())) / 60000), grams: 0, filaments: [], cover: '',
         error: this.state.print_error || 0, partialObservation: a.seen == null,
