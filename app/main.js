@@ -238,7 +238,7 @@ ipcMain.handle('sync:setConfig', (_e, patch) => {
   if (patch.options && patch.options.lang && patch.options.lang !== getLang()) { setLang(patch.options.lang); setAppMenu(); }
   applyLogin();
   engine.start();
-  updateTray();
+  syncTray();
   return publicState();
 });
 ipcMain.handle('sync:login', (_e, a) => engine.login(a));
@@ -410,6 +410,20 @@ function printerSummary() {
     return `${p.name}: ${st}${p.state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${p.job && ['running', 'pause', 'prepare'].includes(p.state) ? ` · ${p.job}` : ''}`;
   } catch { return ''; }
 }
+// The tray icon exists only when PrintLog may run without its window: "keep running in the
+// background" after closing it, or "start with the computer" (which starts hidden). Otherwise
+// closing the window quits, and an icon would suggest it keeps running.
+function syncTray() {
+  const o = cfg().options;
+  const want = !!(o.closeToTray || o.openAtLogin);
+  if (want && !tray) {
+    const img = nativeImage.createFromPath(iconPath(process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'));
+    if (process.platform === 'darwin') img.setTemplateImage(true);
+    tray = new Tray(img);
+    tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
+  } else if (!want && tray) { tray.destroy(); tray = null; }
+  updateTray();
+}
 function updateTray() {
   if (!tray) return;
   const s = printerSummary();
@@ -443,7 +457,7 @@ function applyLogin() {
 app.on('second-instance', showWindow);
 app.on('activate', showWindow);
 app.on('before-quit', () => { quitting = true; engine && engine.stop(); cameras && cameras.stopAll(); });
-app.on('window-all-closed', () => { /* keep running in the tray */ });
+app.on('window-all-closed', () => { /* closing quits unless background mode (see the window's close handler) */ });
 
 function setAppMenu() {
   if (process.platform !== 'darwin') return;
@@ -476,11 +490,7 @@ app.whenReady().then(() => {
   const hidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAsHidden;
   createWindow(!hidden);
   if (hidden && process.platform === 'darwin') app.dock?.hide();
-  const trayImg = nativeImage.createFromPath(iconPath(process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'));
-  if (process.platform === 'darwin') trayImg.setTemplateImage(true);
-  tray = new Tray(trayImg);
-  tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
-  updateTray();
+  syncTray();
   applyLogin();
   engine.start();
 });
