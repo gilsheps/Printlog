@@ -61,4 +61,17 @@ assert.ok(s.byType.PLA.grams === 120, 'PLA grams 70 + 50');
 assert.ok(s.byMonth['2026-03'] && s.byMonth['2026-03'].count === 2, 'both in 2026-03');
 assert.strictEqual(Object.keys(s.unpriced).length, 0, 'all priced in this set');
 
+// --- a cancelled print is not a success and its cost is waste ---
+const pCancel = { result: 'cancel', minutes: 30, grams: 10, end: '2026-03-15T10:00:00Z', filaments: [{ type: 'PLA', color: '#1F77B4', grams: 10 }] };
+const s2 = summarize([pOk, pCancel], settings);
+assert.strictEqual(s2.ok, 1, 'cancel is not ok');
+assert.strictEqual(s2.successRate, 50);
+assert.strictEqual(s2.wasted, costOfPrint(pCancel, settings).total, 'cancelled cost is waste');
+
+// --- filament with no color stays '' (not black) so an "any color" price can cover it ---
+const pNoColor = { result: 'ok', minutes: 0, grams: 20, filaments: [{ type: 'PETG', color: '', grams: 20 }, { type: 'ABS', color: '', grams: 5 }] };
+const s3 = summarize([pNoColor], settings);
+assert.ok(s3.byColor[''] && !s3.byColor['000000'], 'unknown color is its own bucket');
+assert.deepStrictEqual(Object.values(s3.unpriced), [{ type: 'ABS', color: '' }], 'only ABS unpriced; PETG matched type-wide');
+
 console.log('cost ok');

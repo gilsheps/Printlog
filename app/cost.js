@@ -72,7 +72,8 @@ function summarize(prints, settings, filter) {
   let total = 0, fCost = 0, pCost = 0, wasted = 0, grams = 0;
   for (const p of list) {
     const c = costOfPrint(p, settings);
-    const failed = p.result === 'fail';
+    // cancelled / partial prints also used filament without a good part
+    const failed = p.result !== 'ok';
     out.count++; failed ? out.fail++ : out.ok++;
     grams += +p.grams || 0;
     out.minutes += +p.minutes || 0;
@@ -81,7 +82,7 @@ function summarize(prints, settings, filter) {
     for (const f of (Array.isArray(p.filaments) ? p.filaments : [])) {
       const g = +f.grams || 0; if (!g) continue;
       const t = normType(f.type) || '—';
-      const col = normColor(f.color) || '000000';
+      const col = normColor(f.color); // '' = Bambu didn't say
       const m = priceFor(f, settings && settings.filamentPrices);
       const cost = m ? (g / 1000) * m.pricePerKg : 0;
       (out.byType[t] = out.byType[t] || { grams: 0, cost: 0 }).grams += g;

@@ -6,6 +6,8 @@ import { renderThumbnail, Viewer, bedLayout } from './render.js';
 import { readSyncFile, importPrints, attach, norm, isGeneric, entryResult } from './sync.js';
 import helperSrc from '../helper/shelf_sync.py';
 import { native, NativeDirHandle, toBlob } from './native.js';
+import { renderStats, costSettings } from './stats.js';
+import { costOfPrint } from '../app/cost.js';
 
 /* ================= helpers ================= */
 const $ = (s, el = document) => el.querySelector(s);
@@ -44,6 +46,7 @@ const I = {
   ext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>',
   printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M9 7v6l3 3 3-3V7M7 18h10"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
 };
@@ -322,6 +325,7 @@ async function openLibrary(dir) {
   // before the first import: these options change what it does
   let opts = {};
   if (native) { try { opts = (await native.sync.getState()).options || {}; S.autoModels = opts.autoModels !== false; S.autoMatch = opts.autoMatch !== false; S.autoUpdate = opts.autoUpdate !== false; S.mwProfile = opts.mwProfile || ''; } catch { } }
+  S.costOpts = native ? { filamentPrices: opts.filamentPrices, electricity: opts.electricity } : lib.data.prefs?.cost || {};
   // first screen: the user's choice in Settings, or the last one used
   const sv = opts.startView || 'last';
   if (sv === 'last' || sv === 'printer') { if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view; }
@@ -384,7 +388,7 @@ async function syncPrints(force) {
       renderSidebar();
       renderToolbar();
       if (!S.open) renderGrid(); else renderInfo();
-    }
+    } else if (isStatsView() && !S.open) renderGrid(); // stats read S.sync directly
   }
   renderPrinterPill();
   schedulePrefetch();
@@ -1102,7 +1106,7 @@ function renderShell() {
     if (kind === 'view') { S.view = val; S.tag = null; S.folder = null; lib.data.prefs = { ...(lib.data.prefs || {}), view: val }; lib.save(); }
     if (kind === 'tag') { S.tag = S.tag === val ? null : val; }
     if (kind === 'folder') { S.folder = S.folder === val ? null : val; }
-    if (kind === 'src') { S.src = S.src === val ? null : val; if (S.src && ['ok', 'fail', 'history', 'inbox', 'mine'].includes(S.view)) S.view = 'all'; }
+    if (kind === 'src') { S.src = S.src === val ? null : val; if (S.src && ['ok', 'fail', 'history', 'inbox', 'mine', 'stats'].includes(S.view)) S.view = 'all'; }
     renderAll();
   });
   $('#grid').addEventListener('click', onGridClick);
@@ -1182,6 +1186,7 @@ function renderSidebar() {
     ['ok', _t('הדפסות שהצליחו'), '<span class="dot sdot ok"></span>', items.filter((it) => it.n.ok).length],
     ['fail', _t('הדפסות שנכשלו'), '<span class="dot sdot fail"></span>', items.filter((it) => it.n.fail + it.n.cancel).length],
     ['history', _t('כל ההדפסות'), I.printer, runs],
+    ['stats', _t('סטטיסטיקות ועלות'), I.chart, ''],
   ];
   const fv = [
     ['all', _t('כל הקבצים'), I.all, models.length],
@@ -1475,6 +1480,7 @@ async function itemDialog(it) {
         ${r0.filaments && r0.filaments.length ? _t`<dt>פילמנט</dt><dd>${fil(r0)}</dd>` : ''}
         ${r0.minutes ? _t`<dt>זמן</dt><dd>${fmtDur(r0.minutes * 60)}</dd>` : ''}
         ${r0.grams ? _t`<dt>משקל</dt><dd>${r0.grams} g</dd>` : ''}
+        ${costRow(r0)}
         <dt>קובץ</dt><dd><span data-fstat>${cloudEnt ? _t('מוריד מ-Bambu…') : _t('אין קובץ מתאים בתיקייה')}</span> <button class="btn small" data-link>שייך לקובץ…</button></dd>
       </dl>
     </div>
@@ -1559,6 +1565,7 @@ function renderToolbar() {
   const hist = S.view === 'history' && !S.tag && S.folder == null;
   const itemsView = (S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null;
   if (isMineView()) { renderMineToolbar(); return; }
+  if (isStatsView()) { $('#toolbar').innerHTML = `<span class="title">${esc(_t('סטטיסטיקות ועלות'))}</span><span id="prog" class="progress"></span>`; if (S.progress) setProgress(S.progress.label, S.progress.frac); return; }
   const n = inbox ? (S.unmatched || []).length : hist ? historyRows().length : itemsView ? printItems().filter((it) => (S.view === 'ok' ? it.n.ok : it.n.fail + it.n.cancel + it.n.partial)).length : filtered().length;
   const title = (S.tag ? `#${S.tag}` : S.folder != null ? (S.folder || _t('תיקייה ראשית')) : { all: _t('כל הקבצים'), fav: _t('מועדפים'), ok: _t('הדפסות שהצליחו'), fail: _t('הדפסות שנכשלו'), never: _t('עוד לא הודפסו'), versions: _t('עם כמה גרסאות'), inbox: _t('הדפסות לא משויכות'), history: _t('כל ההדפסות'), mine: _t('המודלים שלי ב-MakerWorld') }[S.view]) + (S.src && !inbox && !hist && !itemsView ? ' · ' + SRC[S.src][0] : '');
   $('#toolbar').innerHTML = `
@@ -1676,10 +1683,55 @@ function renderHistory() {
   for (const { it } of rows.slice(0, 120)) if (it.model) { const p = M.cur(it.model).path; if (!seen.has(p)) { seen.add(p); refreshThumb(p); } }
 }
 
+/* ================= statistics + cost (src/stats.js) ================= */
+// Bambu's records with the user's own corrections on top (result / time / weight edited in a
+// print's details), plus prints logged by hand, so stats agree with the rest of the app
+function statsPrints() {
+  const byKey = new Map(), manual = [];
+  for (const m of Object.values(lib.data.models || {})) for (const p of m.prints || []) {
+    if (p.key) byKey.set(p.key, p);
+    else manual.push({ key: 'manual-' + p.id, result: p.result, minutes: +p.minutes || 0, grams: +p.grams || 0, start: p.at || p.date || '', printer: p.printer || '', title: m.name, filaments: p.material && p.grams ? [{ type: p.material, color: p.color || '', grams: +p.grams }] : [] });
+  }
+  const out = [];
+  for (const e of (S.sync && S.sync.prints) || []) {
+    if (!e || !e.key || e.result === 'running') continue;
+    const mp = byKey.get(e.key) || (e.aliasKeys || []).map((k) => byKey.get(k)).find(Boolean);
+    const r = entryResult(e);
+    out.push({ ...e, result: mp && mp.result ? mp.result : r === 'unknown' ? 'partial' : r, ...(mp && +mp.minutes ? { minutes: +mp.minutes } : {}), ...(mp && +mp.grams ? { grams: +mp.grams } : {}) });
+  }
+  return out.concat(manual);
+}
+const isStatsView = () => S.view === 'stats' && !S.tag && S.folder == null;
+function renderStatsView() {
+  renderStats($('#grid'), {
+    prints: statsPrints(),
+    printers: (S.sync && S.sync.printers) || {},
+    options: S.costOpts || {},
+    save: async (patch) => {
+      try {
+        if (native) await native.sync.setConfig({ options: patch });
+        else { lib.data.prefs = { ...(lib.data.prefs || {}), cost: { ...(lib.data.prefs?.cost || {}), ...patch } }; lib.save(); }
+        S.costOpts = { ...(S.costOpts || {}), ...patch };
+        toast(_t('המחירים נשמרו'));
+      } catch (e) { toast(_t('השמירה נכשלה: ') + (e && e.message), true); throw e; }
+    },
+  });
+}
+// cost of one print run, for the print details (only once prices are set)
+function costRow(r) {
+  const st = costSettings(S.costOpts);
+  if (!r || !(st.filamentPrices.length || st.electricity.pricePerKwh)) return '';
+  const c = costOfPrint(r, st);
+  if (!c.total) return '';
+  const fmt = (v) => { try { return new Intl.NumberFormat(loc(), { style: 'currency', currency: 'ILS' }).format(v); } catch { return '₪' + v; } };
+  return _t`<dt>עלות</dt><dd>${fmt(c.total)} <span style="color:var(--ink3)">(${fmt(c.filamentCost)} פילמנט · ${fmt(c.powerCost)} חשמל)</span>${c.unpriced.length ? ' <span class="badge" title="' + esc(_t('לחלק מהפילמנט אין מחיר')) + '">' + _t('חלקי') + '</span>' : ''}</dd>`;
+}
+
 function renderGrid() {
   if (S.view === 'inbox' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderInbox(); return; }
   if (S.view === 'history' && !S.tag && S.folder == null) { $('#grid').classList.remove('selecting'); S.visible = []; renderHistory(); return; }
   if ((S.view === 'ok' || S.view === 'fail') && !S.tag && S.folder == null) { renderItems(S.view); return; }
+  if (isStatsView()) { $('#grid').classList.remove('selecting'); S.visible = []; renderStatsView(); return; }
   if (isMineView()) { renderMine(); return; }
   const list = filtered();
   const entries = gridEntries(list);

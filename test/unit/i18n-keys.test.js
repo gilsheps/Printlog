@@ -5,7 +5,7 @@ const acorn = require('acorn'), walk = require('acorn-walk');
 const repo = path.join(__dirname, '..', '..');
 const d = JSON.parse(fs.readFileSync(path.join(repo, 'app/lang-en.json'), 'utf8'));
 const HEB = /[֐-׿]/;
-const files = { 'src/app.js': 'module', 'src/printer.js': 'module', 'src/sync.js': 'module', 'app/main.js': 'script', 'app/engine.js': 'script', 'app/gdrive.js': 'script', 'app/timelapse.js': 'script' };
+const files = { 'src/app.js': 'module', 'src/printer.js': 'module', 'src/sync.js': 'module', 'src/stats.js': 'module', 'app/main.js': 'script', 'app/engine.js': 'script', 'app/gdrive.js': 'script', 'app/timelapse.js': 'script' };
 // left as plain Hebrew on purpose: translated with _t()/tx() at the point of use, or shown in both languages
 const RAW_OK = [/^עברית$/, /^<div class="field"/, /^תקלה ב/, /^Google לא נתנו/];
 const problems = [];
