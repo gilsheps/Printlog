@@ -1338,18 +1338,19 @@ S.dl = new Map(); // print key -> { state: queued | dl | done | error, p }
 S.dlDone = new Set();
 function dlKey(it) {
   if (!native || !native.sync.prefetch) return '';
-  const e = it.runs.map((r) => r.entry).find((x) => x && /^cloud-/.test(x.key || ''));
+  // Bambu Cloud prints, and prints seen only on the LAN (their file may still be on the printer)
+  const e = it.runs.map((r) => r.entry).find((x) => x && /^cloud-/.test(x.key || '')) || it.runs.map((r) => r.entry).find((x) => x && /^live-/.test(x.key || ''));
   return e ? e.key : '';
 }
 function dlState(it, k) {
   const s = S.dl.get(k);
   if (s) return s;
   const e = it.runs.map((r) => r.entry).find((x) => x && x.key === k);
-  if (e && e.modelTries >= 2) return { state: 'error', error: e.modelError };
+  if (e && e.modelGone) return { state: 'error', error: e.modelError };
   return { state: S.autoModels === false ? 'off' : 'queued' };
 }
 const dlClass = (s) => ({ queued: 'pending', off: 'pending', dl: 'dl', error: 'nofile', done: 'dl' }[s.state] || '');
-const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? _t`מוריד ${Math.round((s.p || 0) * 100)}%` : _t('מוריד…')) : s.state === 'error' ? _t('אין קובץ ב-Bambu') : s.state === 'off' ? _t('לחץ להורדה') : _t('ממתין להורדה'));
+const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? _t`מוריד ${Math.round((s.p || 0) * 100)}%` : _t('מוריד…')) : s.state === 'error' ? _t('לא נמצא קובץ') : s.state === 'off' ? _t('לחץ להורדה') : _t('ממתין להורדה'));
 function applyDl(el, s) {
   el.classList.remove('pending', 'dl', 'nofile');
   const c = dlClass(s); if (c) el.classList.add(c);
@@ -1467,14 +1468,15 @@ async function itemDialog(it) {
   const u = await coverURL(it.cover);
   const r0 = it.last;
   // a cloud print can bring its own 3MF: download it and open the full 3D view
-  const cloudEnt = native && native.sync.fetchModel && S.sync && (it.runs.map((r) => r.entry).find((e) => e && /^cloud-/.test(e.key || '')) || null);
+  const dk = native && native.sync.fetchModel && S.sync ? dlKey(it) : '';
+  const cloudEnt = dk ? it.runs.map((r) => r.entry).find((e) => e && e.key === dk) || null : null;
   const fil = (r) => (r.filaments || []).map((f) => `<span class="fil">${f.color ? `<span class="swatch" style="background:${esc(f.color)}"></span>` : ''}<span>${esc(f.type || '')}</span>${f.grams ? `<span class="ltr" style="color:var(--ink3)">${f.grams}g</span>` : ''}</span>`).join('');
   const when = (t) => { try { return new Date(t).toLocaleString(loc(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   d.innerHTML = _t`<div class="box wide item-box">
     <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0;flex:1">${esc(it.name)}${it.plate && it.multiPlate ? _t` <span class="badge accent">פלטה ${it.plate}</span>` : ''}</h3><button class="btn icon-btn ghost" data-close>${I.close}</button></div>
     ${it.design ? `<div class="hint" style="margin:2px 0 8px">${esc(it.design)}</div>` : ''}
     <div class="item-top">
-      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}${cloudEnt ? _t`<div class="item-fetch"><div class="spin"></div><span>מוריד את המודל מ-Bambu לתצוגה בתלת-ממד…</span></div>` : ''}</div>
+      <div class="item-cover">${u ? `<img src="${u}" alt="">` : `<div class="ph">${I.cube}</div>`}${cloudEnt ? _t`<div class="item-fetch"><div class="spin"></div><span>מוריד את המודל לתצוגה בתלת-ממד…</span></div>` : ''}</div>
       <dl class="kv">
         <dt>הדפסות</dt><dd>${it.runs.length} · ${it.n.ok} הצליחו${it.n.fail ? _t` · ${it.n.fail} נכשלו` : ''}${it.n.cancel ? _t` · ${it.n.cancel} בוטלו` : ''}</dd>
         ${r0.printer ? _t`<dt>מדפסת</dt><dd>${esc(r0.printer)}</dd>` : ''}
@@ -1482,7 +1484,7 @@ async function itemDialog(it) {
         ${r0.minutes ? _t`<dt>זמן</dt><dd>${fmtDur(r0.minutes * 60)}</dd>` : ''}
         ${r0.grams ? _t`<dt>משקל</dt><dd>${r0.grams} g</dd>` : ''}
         ${costRow(r0)}
-        <dt>קובץ</dt><dd><span data-fstat>${cloudEnt ? _t('מוריד מ-Bambu…') : _t('אין קובץ מתאים בתיקייה')}</span> <button class="btn small" data-link>שייך לקובץ…</button></dd>
+        <dt>קובץ</dt><dd><span data-fstat>${cloudEnt ? _t('מוריד…') : _t('אין קובץ מתאים בתיקייה')}</span> <button class="btn small" data-link>שייך לקובץ…</button></dd>
       </dl>
     </div>
     <div class="section-title">כל ההדפסות</div>
@@ -1512,7 +1514,7 @@ async function itemDialog(it) {
 async function fetchCloudModel(it, ent, d) {
   const fail = (msg) => {
     const f = $('.item-fetch', d); if (f) f.remove();
-    const s = $('[data-fstat]', d); if (s) s.textContent = _t('אין קובץ בתיקייה, ו-Bambu לא החזירו את המודל');
+    const s = $('[data-fstat]', d); if (s) s.textContent = _t('אין קובץ בתיקייה, והמודל לא נמצא ב-Bambu ולא בזיכרון המדפסת');
     if (msg) console.warn('fetchModel', msg);
   };
   const r = await native.sync.fetchModel(ent.key);

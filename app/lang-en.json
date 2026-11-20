@@ -641,5 +641,12 @@
  "הפערים הגדולים": "Biggest differences",
  "אין הדפסות עם זמן משוער": "No prints with an estimated time",
  "לפחות {}": "at least {}",
- "ללא נתוני משקל": "no weight data"
+ "ללא נתוני משקל": "no weight data",
+ "<div class=\"item-fetch\"><div class=\"spin\"></div><span>מוריד את המודל לתצוגה בתלת-ממד…</span></div>": "<div class=\"item-fetch\"><div class=\"spin\"></div><span>Downloading the model for the 3D view…</span></div>",
+ "לא נמצא קובץ": "No file found",
+ "אין קובץ בתיקייה, והמודל לא נמצא ב-Bambu ולא בזיכרון המדפסת": "No file in the folder, and the model wasn't found on Bambu or on the printer's storage",
+ "הקובץ לא נמצא ב-Bambu ולא בזיכרון המדפסת": "The file wasn't found on Bambu or on the printer's storage",
+ "אין קובץ ב-Bambu, והמדפסת לא זמינה ברשת המקומית": "Bambu has no file, and the printer isn't reachable on the local network",
+ "ההורדה מהמדפסת לא הושלמה": "The download from the printer didn't finish",
+ "הקובץ נמצא במדפסת, אבל המדפסת לא מאפשרת להוריד אותו": "The file is on the printer, but the printer doesn't allow downloading it"
 }

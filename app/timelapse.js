@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const ftp = require('basic-ftp');
+const { access, blanked } = require('./printerfiles');
 
 const DIRS = ['/timelapse', '/sdcard/timelapse'];
 const VIDEO = /\.(mp4|avi)$/i;
@@ -44,7 +45,7 @@ async function syncPrinter({ printer, library, out, del, log }) {
   const client = new ftp.Client(30000);
   let got = 0;
   try {
-    await client.access({ host: printer.ip, port: 990, user: 'bblp', password: printer.access_code, secure: 'implicit', secureOptions: { rejectUnauthorized: false } });
+    await client.access(access(printer)); // same FTPS options as the print files (incl. the data-channel fix)
     const vids = await listVideos(client);
     const seen = new Set(out.data.timelapseSeen || []);
     const dir = path.join(library, '.shelf', 'timelapse');
@@ -59,6 +60,8 @@ async function syncPrinter({ printer, library, out, del, log }) {
       const part = dst + '.part';
       await client.downloadTo(part, `${v.dir}/${v.name}`);
       if (v.size && fs.statSync(part).size !== v.size) { fs.unlinkSync(part); throw new Error(`${v.name}: incomplete download`); }
+      // the printer may serve a blanked copy: never link it, and never delete the original for it
+      if (blanked(part)) { fs.unlinkSync(part); throw new Error('the printer serves blanked files (download blocked by its firmware)'); }
       fs.renameSync(part, dst);
       p.timelapse = 'timelapse/' + name;
       seen.add(id);
