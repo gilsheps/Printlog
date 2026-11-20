@@ -394,7 +394,7 @@ async function syncPrints(force) {
   schedulePrefetch();
 }
 
-const PSTATE = { running: _t('מדפיס'), prepare: _t('מתכונן'), pause: _t('מושהה'), finish: _t('סיים'), failed: _t('נכשל'), idle: _t('פנוי'), slicing: _t('פורס'), offline: _t('לא מחובר'), error: _t('שגיאת חיבור'), unknown: _t('לא ידוע'), connecting: _t('מתחבר…'), silent: _t('לא מגיבה (כבויה?)') };
+const PSTATE = { running: _t('מדפיס'), prepare: _t('מתכונן'), pause: _t('מושהה'), finish: _t('סיים'), failed: _t('ההדפסה האחרונה לא הושלמה'), idle: _t('פנוי'), slicing: _t('פורס'), offline: _t('לא מחובר'), error: _t('שגיאת חיבור'), unknown: _t('לא ידוע'), connecting: _t('מתחבר…'), silent: _t('לא מגיבה (כבויה?)') };
 function helperState() {
   const d = S.sync;
   if (!d) return { kind: 'none' };
@@ -420,7 +420,7 @@ function renderPrinterPill() {
     // no report yet: still connecting, or the printer is off / not answering
     const quiet = !p.state || p.state === 'unknown';
     const state = p.conn === 'error' ? 'error' : !live || p.conn === 'offline' ? 'offline' : quiet ? (Date.now() - (Date.parse(S.sync.helper?.started || '') || 0) < 90000 ? 'connecting' : 'silent') : p.state;
-    dot = state === 'running' || state === 'prepare' ? 'run' : state === 'failed' || state === 'error' ? 'bad' : state === 'offline' || state === 'silent' ? 'off' : 'idle';
+    dot = state === 'running' || state === 'prepare' ? 'run' : state === 'error' ? 'bad' : state === 'offline' || state === 'silent' ? 'off' : 'idle';
     text = `${p.name || _t('מדפסת')} · ${PSTATE[state] || state}${state === 'running' && p.progress != null ? ` ${p.progress}%` : ''}${['running', 'pause', 'prepare'].includes(state) && p.job ? ` · ${p.job}` : ''}`;
   } else { text = _t('מסונכרן'); }
   const perr = printers.map((x) => x.conn === 'error' && x.error).find(Boolean);

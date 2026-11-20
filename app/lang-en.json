@@ -648,5 +648,7 @@
  "הקובץ לא נמצא ב-Bambu ולא בזיכרון המדפסת": "The file wasn't found on Bambu or on the printer's storage",
  "אין קובץ ב-Bambu, והמדפסת לא זמינה ברשת המקומית": "Bambu has no file, and the printer isn't reachable on the local network",
  "ההורדה מהמדפסת לא הושלמה": "The download from the printer didn't finish",
- "הקובץ נמצא במדפסת, אבל המדפסת לא מאפשרת להוריד אותו": "The file is on the printer, but the printer doesn't allow downloading it"
+ "הקובץ נמצא במדפסת, אבל המדפסת לא מאפשרת להוריד אותו": "The file is on the printer, but the printer doesn't allow downloading it",
+ "ההדפסה האחרונה לא הושלמה": "last print didn't finish",
+ "פנויה · ההדפסה האחרונה לא הושלמה": "free · last print didn't finish"
 }

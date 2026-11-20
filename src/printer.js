@@ -9,7 +9,7 @@ const STAGE = {
   30: _t('הושהה מתוך ה-G-code'), 31: _t('בדיקת רעשי מנוע'), 32: _t('נעצר: פילמנט על הפיה'), 33: _t('נעצר: תקלה בחותך'), 34: _t('נעצר: בעיה בשכבה הראשונה'), 35: _t('נעצר: סתימה בפיה'),
 };
 const SPEED = { 1: _t('שקט'), 2: _t('רגיל'), 3: _t('ספורט'), 4: _t('טורבו') };
-const STATE = { RUNNING: _t('מדפיס'), PREPARE: _t('מתכונן'), PAUSE: _t('מושהה'), FINISH: _t('סיים'), FAILED: _t('נכשל'), IDLE: _t('פנוי'), SLICING: _t('פורס') };
+const STATE = { RUNNING: _t('מדפיס'), PREPARE: _t('מתכונן'), PAUSE: _t('מושהה'), FINISH: _t('סיים'), FAILED: _t('פנויה · ההדפסה האחרונה לא הושלמה'), IDLE: _t('פנוי'), SLICING: _t('פורס') };
 const HMS_MODULE = { '03': _t('מערכת התנועה'), '05': _t('לוח ראשי'), '07': 'AMS', '08': _t('ראש ההדפסה'), '0C': _t('מצלמה וחיישנים'), '12': 'AMS Lite', '18': 'AMS HT' };
 const hmsCode = (attr, code) => { const h = (n) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0'); return (h(attr) + h(code)).match(/.{4}/g).join('_'); };
 const num = (v) => (v == null || v === '' || isNaN(+v) ? null : +v);
