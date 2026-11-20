@@ -179,7 +179,7 @@ class Cameras {
     const t = camTransport(detail);
     // RTSP model with liveview switched off — genuinely unavailable until enabled
     // (Home Assistant behaves the same). Tell the user how to turn it on.
-    if (t.how === 'off') throw new Error('המצלמה כבויה — הפעל צפייה ברשת מקומית (LAN Liveview) בהגדרות המדפסת');
+    if (t.how === 'off') throw new Error('המצלמה של המדפסת לא משדרת ברשת המקומית');
     // X1 / P2 / H2 / X2: full video over RTSP(S), restreamed by go2rtc.
     if (t.how === 'rtsp') return this.startRtsp(serial, ip, code, t.mode, t.url);
     // A1 / P1: the JPEG chamber image straight off port 6000 — same path Home
@@ -203,7 +203,7 @@ class Cameras {
     // streams. Without this check a disabled liveview is a silent black player.
     if (!(await this.probeStream(name))) {
       await this.stop(serial);
-      throw new Error('המצלמה כבויה — הפעל צפייה ברשת מקומית (LAN Liveview) בהגדרות המדפסת');
+      throw new Error('המצלמה של המדפסת לא משדרת ברשת המקומית');
     }
     return { kind: 'webrtc', url: `http://127.0.0.1:${this.apiPort}/webrtc.html?src=${name}&media=video` };
   }
