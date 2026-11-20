@@ -5,6 +5,9 @@ description: Check PrintLog before pushing or releasing - build, quick tests, tr
 
 # Before pushing PrintLog
 
+Answer Gil in Hebrew (code, commit messages and technical terms stay in English). Never suggest changing the
+printer's settings: work with how it is set up, cloud or local.
+
 Run these in order. Stop at the first failure, fix it, and start again from step 1.
 
 1. **Build and quick checks**: `npm run check`
@@ -19,6 +22,9 @@ Run these in order. Stop at the first failure, fix it, and start again from step
    - texts built at module load in `app/` (they don't follow a language change: translate where used)
    - settings: a new option must be read in `publicState`/`getState` and saved in `save()` in `src/app.js`
    - releases: macOS ships only the dmg and the in-app updater installs from it
+   - printer settings as they are: every feature works with a cloud-connected printer and with a LAN-only
+     one, and degrades quietly when the printer's settings or firmware block something. No text in the app
+     (or in what you tell the user) asks to change a printer setting (Developer Mode, LAN Only, LAN Liveview…).
    Fix real problems; mention judgment calls to the user instead of changing them silently.
 
 3. **Push**: `git push origin main`. The `.githooks/pre-push` hook runs `npm run check` again
