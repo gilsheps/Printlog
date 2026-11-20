@@ -75,3 +75,53 @@ assert.ok(s3.byColor[''] && !s3.byColor['000000'], 'unknown color is its own buc
 assert.deepStrictEqual(Object.values(s3.unpriced), [{ type: 'ABS', color: '' }], 'only ABS unpriced; PETG matched type-wide');
 
 console.log('cost ok');
+
+// --- spool price: ₪70 for a 1000g spool = ₪70/kg; a 750g spool at ₪60 = ₪80/kg ---
+{
+  const { perKg, timeAccuracy } = require('../../app/cost.js');
+  assert.strictEqual(perKg({ spoolPrice: 70, spoolGrams: 1000 }), 70, 'spool of 1kg');
+  assert.strictEqual(perKg({ spoolPrice: 60, spoolGrams: 750, pricePerKg: 1 }), 80, 'spool price wins over per-kg');
+  assert.strictEqual(perKg({ pricePerKg: 95 }), 95, 'per-kg entry');
+  const sp = { filamentPrices: [{ type: 'PLA', color: '', spoolPrice: 60, spoolGrams: 750 }] };
+  assert.strictEqual(costOfPrint({ filaments: [{ type: 'PLA', color: '#123456', grams: 100 }] }, sp).filamentCost, 8, '100g at ₪80/kg');
+
+  // --- no weight data: counted, not treated as a zero-gram print ---
+  const nd = costOfPrint({ result: 'ok', minutes: 60, grams: 0, filaments: [{ type: 'PLA', color: '#1F77B4' }] }, settings);
+  assert.strictEqual(nd.noData, true, 'no grams → noData');
+  assert.strictEqual(costOfPrint(p1, settings).noData, false, 'grams present');
+  const sd = summarize([p1, { result: 'ok', minutes: 30, filaments: [] }], settings);
+  assert.strictEqual(sd.noData, 1, 'one print without weight');
+
+  // --- success rate per filament type (a print counts once per type it used) ---
+  const rs = summarize([
+    p1,
+    { result: 'fail', filaments: [{ type: 'PLA', color: '#1F77B4', grams: 5 }, { type: 'PETG', color: '', grams: 5 }] },
+    { result: 'cancel', filaments: [{ type: 'PETG', color: '', grams: 3 }] },
+  ], settings);
+  assert.deepStrictEqual(rs.rateByType.PLA, { count: 2, ok: 1, rate: 50 }, 'PLA 1 of 2');
+  assert.deepStrictEqual(rs.rateByType.PETG, { count: 2, ok: 0, rate: 0 }, 'PETG 0 of 2');
+
+  // --- estimated vs actual time ---
+  const ta = timeAccuracy([
+    { result: 'ok', estMinutes: 100, minutes: 110, start: '2026-01-01T00:00:00Z', end: new Date(Date.parse('2026-01-01T00:00:00Z') + 110 * 6e4).toISOString() },
+    { result: 'ok', estMinutes: 100, minutes: 90, start: '2026-01-01T00:00:00Z', end: new Date(Date.parse('2026-01-01T00:00:00Z') + 90 * 6e4).toISOString() },
+    { result: 'ok', estMinutes: 100, minutes: 120, start: '2026-01-01T00:00:00Z', end: new Date(Date.parse('2026-01-01T00:00:00Z') + 120 * 6e4).toISOString() },
+    { result: 'fail', estMinutes: 100, minutes: 10, start: '2026-01-01T00:00:00Z', end: new Date(Date.parse('2026-01-01T00:00:00Z') + 10 * 6e4).toISOString() },   // failed: not a timing sample
+    { result: 'ok', estMinutes: 60, minutes: 600, start: '2026-01-01T00:00:00Z', end: new Date(Date.parse('2026-01-01T00:00:00Z') + 600 * 6e4).toISOString() },     // paused for hours: outlier
+    { result: 'ok', minutes: 50 },                      // no estimate
+  ]);
+  assert.strictEqual(ta.count, 3, 'only finished prints with both times, no outliers');
+  assert.strictEqual(ta.diffPct, 7, '320 actual vs 300 est → +7%');
+}
+
+// --- only a total weight (edited by hand / manual print): priced on the single filament ---
+{
+  const { timeAccuracy } = require('../../app/cost.js');
+  const one = costOfPrint({ grams: 100, filaments: [{ type: 'PETG', color: '#123456' }] }, settings);
+  assert.strictEqual(one.filamentCost, 9.5, '100 g of type-wide PETG at 95/kg');
+  assert.strictEqual(one.noData, false, 'total weight known');
+  const many = costOfPrint({ grams: 100, filaments: [{ type: 'PLA' }, { type: 'PETG' }] }, settings);
+  assert.strictEqual(many.unpriced.length, 1, 'several filaments, one total: unknown split → unpriced');
+  // minutes without real start/end are Bambu's estimate: not a timing sample
+  assert.strictEqual(timeAccuracy([{ result: 'ok', estMinutes: 100, minutes: 100 }]).count, 0, 'no start/end → skipped');
+}

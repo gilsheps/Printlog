@@ -28,7 +28,30 @@ function priceFor(fil, prices) {
   const list = Array.isArray(prices) ? prices : [];
   let best = c && list.find((p) => normType(p.type) === t && normColor(p.color) === c);
   if (!best) best = list.find((p) => normType(p.type) === t && !normColor(p.color));
-  return best ? { pricePerKg: +best.pricePerKg || 0, entry: best } : null;
+  return best ? { pricePerKg: perKg(best), entry: best } : null;
+}
+
+// ₪/kg of a price entry: entered per kg, or as a spool price + spool weight (grams)
+function perKg(e) {
+  if (!e) return 0;
+  if (+e.spoolPrice > 0 && +e.spoolGrams > 0) return (+e.spoolPrice / +e.spoolGrams) * 1000;
+  return +e.pricePerKg || 0;
+}
+
+// grams of filament a print record says it used (0 = Bambu didn't record a weight)
+function gramsOf(print) {
+  const fils = Array.isArray(print && print.filaments) ? print.filaments : [];
+  const g = fils.reduce((a, f) => a + (+f.grams || 0), 0);
+  return g || +(print && print.grams) || 0;
+}
+
+// the filaments to price: when only the total weight is known (edited by hand, or a manual
+// print) it goes to the single filament, or to an unknown one when there are several / none
+function filsOf(print) {
+  const fils = Array.isArray(print && print.filaments) ? print.filaments : [];
+  const total = +(print && print.grams) || 0;
+  if (fils.some((f) => +f.grams > 0) || !total) return fils;
+  return fils.length === 1 ? [{ ...fils[0], grams: total }] : [{ type: '', color: '', grams: total }];
 }
 
 // Electricity cost of a print: minutes → kWh at the printer's average draw (W).
@@ -42,7 +65,7 @@ function powerCost(minutes, electricity) {
 // A failed print still has a real cost (wasted filament + power).
 function costOfPrint(print, settings) {
   const s = settings || {};
-  const fils = Array.isArray(print && print.filaments) ? print.filaments : [];
+  const fils = filsOf(print);
   let filamentCost = 0;
   const unpriced = [];
   for (const f of fils) {
@@ -52,7 +75,9 @@ function costOfPrint(print, settings) {
     else if (grams > 0) unpriced.push({ type: normType(f.type), color: normColor(f.color), grams });
   }
   const power = powerCost(print && print.minutes, s.electricity);
-  return { filamentCost: round2(filamentCost), powerCost: round2(power), total: round2(filamentCost + power), unpriced };
+  // no weight at all: the filament cost is unknown, not zero
+  const noData = !gramsOf(print);
+  return { filamentCost: round2(filamentCost), powerCost: round2(power), total: round2(filamentCost + power), unpriced, noData };
 }
 
 const monthKey = (iso) => {
@@ -68,6 +93,7 @@ function summarize(prints, settings, filter) {
     count: 0, ok: 0, fail: 0, successRate: 0, grams: 0, minutes: 0,
     total: 0, filamentCost: 0, powerCost: 0, wasted: 0,
     byType: {}, byColor: {}, byMonth: {}, unpriced: {},
+    noData: 0, rateByType: {},
   };
   let total = 0, fCost = 0, pCost = 0, wasted = 0, grams = 0;
   for (const p of list) {
@@ -79,7 +105,11 @@ function summarize(prints, settings, filter) {
     out.minutes += +p.minutes || 0;
     total += c.total; fCost += c.filamentCost; pCost += c.powerCost;
     if (failed) wasted += c.total;
-    for (const f of (Array.isArray(p.filaments) ? p.filaments : [])) {
+    if (c.noData) out.noData++;
+    // success rate per filament type: each print counts once for every type it used
+    const types = new Set(filsOf(p).map((f) => normType(f.type)).filter(Boolean));
+    for (const t of types) { const r = (out.rateByType[t] = out.rateByType[t] || { count: 0, ok: 0, rate: 0 }); r.count++; if (!failed) r.ok++; }
+    for (const f of filsOf(p)) {
       const g = +f.grams || 0; if (!g) continue;
       const t = normType(f.type) || '—';
       const col = normColor(f.color); // '' = Bambu didn't say
@@ -102,8 +132,30 @@ function summarize(prints, settings, filter) {
   out.successRate = out.count ? Math.round((out.ok / out.count) * 100) : 0;
   for (const k of Object.keys(out.byType)) { out.byType[k].grams = round2(out.byType[k].grams); out.byType[k].cost = round2(out.byType[k].cost); }
   for (const k of Object.keys(out.byColor)) { out.byColor[k].grams = round2(out.byColor[k].grams); out.byColor[k].cost = round2(out.byColor[k].cost); }
+  for (const r of Object.values(out.rateByType)) r.rate = Math.round((r.ok / r.count) * 100);
   for (const k of Object.keys(out.byMonth)) { const b = out.byMonth[k]; b.filament = round2(b.filament); b.power = round2(b.power); b.cost = round2(b.cost); }
   return out;
+}
+
+// Estimated (slicer) vs actual print time, over finished prints that have both.
+// → { count, est, actual, diffPct, prints: [{ print, est, actual, diff }] }
+// diffPct > 0: prints took longer than estimated. Cut-off outliers (< 25% or > 400%
+// of the estimate) are left out: those are stops/pauses, not a wrong estimate.
+function timeAccuracy(prints) {
+  const rows = [];
+  for (const p of (Array.isArray(prints) ? prints : [])) {
+    if (!p || p.result !== 'ok') continue;
+    // without real start/end times Bambu's "minutes" is the estimate itself, not a measurement
+    const ts = Date.parse(p.start || ''), te = Date.parse(p.end || '');
+    if (!(te > ts)) continue;
+    const est = +p.estMinutes || 0, actual = +p.minutes || 0;
+    if (est < 1 || actual < 1) continue;
+    const r = actual / est;
+    if (r < 0.25 || r > 4) continue;
+    rows.push({ print: p, est, actual, diff: actual - est });
+  }
+  const est = rows.reduce((a, r) => a + r.est, 0), actual = rows.reduce((a, r) => a + r.actual, 0);
+  return { count: rows.length, est, actual, diffPct: est ? Math.round(((actual - est) / est) * 100) : 0, prints: rows };
 }
 
 // 7×24 grid of print counts by local weekday (0=Sun) and hour, from start time.
@@ -116,4 +168,4 @@ function activityHeatmap(prints) {
   return grid;
 }
 
-module.exports = { normType, normColor, priceFor, powerCost, costOfPrint, summarize, activityHeatmap, monthKey, round2 };
+module.exports = { normType, normColor, priceFor, perKg, gramsOf, filsOf, timeAccuracy, powerCost, costOfPrint, summarize, activityHeatmap, monthKey, round2 };

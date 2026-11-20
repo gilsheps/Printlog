@@ -6,7 +6,7 @@ import { renderThumbnail, Viewer, bedLayout } from './render.js';
 import { readSyncFile, importPrints, attach, norm, isGeneric, entryResult } from './sync.js';
 import helperSrc from '../helper/shelf_sync.py';
 import { native, NativeDirHandle, toBlob } from './native.js';
-import { renderStats, costSettings } from './stats.js';
+import { renderStats, costSettings, hasPrices, money, printCostText } from './stats.js';
 import { costOfPrint } from '../app/cost.js';
 
 /* ================= helpers ================= */
@@ -325,7 +325,7 @@ async function openLibrary(dir) {
   // before the first import: these options change what it does
   let opts = {};
   if (native) { try { opts = (await native.sync.getState()).options || {}; S.autoModels = opts.autoModels !== false; S.autoMatch = opts.autoMatch !== false; S.autoUpdate = opts.autoUpdate !== false; S.mwProfile = opts.mwProfile || ''; } catch { } }
-  S.costOpts = native ? { filamentPrices: opts.filamentPrices, electricity: opts.electricity } : lib.data.prefs?.cost || {};
+  S.costOpts = native ? { filamentPrices: opts.filamentPrices, electricity: opts.electricity, currency: opts.currency } : lib.data.prefs?.cost || {};
   // first screen: the user's choice in Settings, or the last one used
   const sv = opts.startView || 'last';
   if (sv === 'last' || sv === 'printer') { if (lib.data.prefs?.view && lib.data.prefs.view !== 'inbox') S.view = lib.data.prefs.view; }
@@ -1239,7 +1239,8 @@ function printItems() {
     const it = get(key, { model: m || null, plate, name, design: sub });
     add(it, {
       result: mp ? mp.result : entryResult(e) === 'unknown' ? 'partial' : entryResult(e),
-      t: Date.parse(e.start || '') || 0, minutes: e.minutes, grams: e.grams, filaments: e.filaments || [], printer: e.printer,
+      // the user's corrections in the print's details win over Bambu's numbers (same as the stats view)
+      t: Date.parse(e.start || '') || 0, minutes: (mp && +mp.minutes) || e.minutes, grams: (mp && +mp.grams) || e.grams, filaments: e.filaments || [], printer: e.printer,
       coverFile: e.coverFile || '', cover: e.cover || '', title: e.title, source: e.source, entry: e, notes: mp ? mp.notes : '',
     });
   }
@@ -1248,7 +1249,7 @@ function printItems() {
     if (p.key || runKeys.has(p.id)) continue;
     const plate = +p.plateNo || 0;
     const it = get('m:' + m.id + '#' + plate, { model: m, plate, name: m.name, design: '' });
-    add(it, { result: p.result, t: Date.parse(p.at || '') || Date.parse(p.date || '') || 0, minutes: p.minutes, grams: p.grams, filaments: p.material ? [{ type: p.material, color: p.color }] : [], printer: p.printer || '', coverFile: '', title: m.name, source: 'manual', notes: p.notes });
+    add(it, { result: p.result, t: Date.parse(p.at || '') || Date.parse(p.date || '') || 0, minutes: p.minutes, grams: p.grams, filaments: p.material ? [{ type: p.material, color: p.color, grams: +p.grams || 0 }] : [], printer: p.printer || '', coverFile: '', title: m.name, source: 'manual', notes: p.notes });
   }
   const platesPerBase = new Map();
   for (const it of items.values()) { const b = it.key.slice(0, it.key.lastIndexOf('#')); platesPerBase.set(b, (platesPerBase.get(b) || 0) + 1); }
@@ -1429,7 +1430,7 @@ function itemCardHTML(it, kind) {
     <div class="body">
       <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
       ${it.design ? `<div class="sub" style="margin-top:0">${esc(it.design)}</div>` : ''}
-      <div class="sub"><span class="st"><span class="sdot ${run.result}"></span>${RESULT[run.result] || ''} · ${when(run.t)}${run.minutes ? ' · ' + fmtDur(run.minutes * 60) : ''}</span></div>
+      <div class="sub"><span class="st"><span class="sdot ${run.result}"></span>${RESULT[run.result] || ''} · ${when(run.t)}${run.minutes ? ' · ' + fmtDur(run.minutes * 60) : ''}</span>${(() => { const c = printCostText(run, S.costOpts); return c ? ` <span class="cost ltr" title="${esc(_t('עלות ההדפסה'))}"><bdi>${esc(c)}</bdi></span>` : ''; })()}</div>
     </div>
   </div>`;
 }
@@ -1673,7 +1674,7 @@ function renderHistory() {
       return `<div class="irow" data-item="${esc(it.key)}" style="cursor:pointer">
         ${u ? `<img class="icover" src="${u}" alt="" style="object-fit:contain">` : `<div class="icover" ${r.coverFile || it.cover ? `data-cover="${esc(r.coverFile || it.cover)}"` : path ? (it.plate ? `data-pthumb="${esc(path + '#' + it.plate)}"` : `data-thumb="${esc(path)}"`) : ''}></div>`}
         <div class="ii"><div class="it">${esc(it.name)}${it.plate && it.multiPlate ? _t` <span class="badge accent">פלטה ${it.plate}</span>` : ''} ${itemFileBadge(it)}</div>
-          <div class="isub">${[when(r.t), r.printer, r.minutes ? fmtDur(r.minutes * 60) : '', r.grams ? r.grams + ' g' : '', (r.filaments || []).map((f) => f.type).filter(Boolean).join(' + '), r.source === 'manual' ? _t('ידני') : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
+          <div class="isub">${[when(r.t), r.printer, r.minutes ? fmtDur(r.minutes * 60) : '', r.grams ? r.grams + ' g' : '', (r.filaments || []).map((f) => f.type).filter(Boolean).join(' + '), printCostText(r, S.costOpts), r.source === 'manual' ? _t('ידני') : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
         <span class="pill ${r.result}">${RESULT[r.result] || r.result}</span>
       </div>`;
     }).join('') : _t('<div class="empty"><b>עוד אין הדפסות</b>התחבר ל-Bambu ב„חיבור למדפסת”, או רשום הדפסה מתוך קובץ.</div>')}
@@ -1720,10 +1721,11 @@ function renderStatsView() {
 // cost of one print run, for the print details (only once prices are set)
 function costRow(r) {
   const st = costSettings(S.costOpts);
-  if (!r || !(st.filamentPrices.length || st.electricity.pricePerKwh)) return '';
+  if (!r || !hasPrices(st)) return '';
   const c = costOfPrint(r, st);
+  const fmt = (v) => money(v, 2, st.currency);
+  if (c.noData) return _t`<dt>עלות</dt><dd>${c.total ? fmt(c.total) + ' ' : ''}<span style="color:var(--ink3)">(${c.total ? _t('ללא נתוני משקל — רק חשמל') : _t('ללא נתוני משקל')})</span></dd>`;
   if (!c.total) return '';
-  const fmt = (v) => { try { return new Intl.NumberFormat(loc(), { style: 'currency', currency: 'ILS' }).format(v); } catch { return '₪' + v; } };
   return _t`<dt>עלות</dt><dd>${fmt(c.total)} <span style="color:var(--ink3)">(${fmt(c.filamentCost)} פילמנט · ${fmt(c.powerCost)} חשמל)</span>${c.unpriced.length ? ' <span class="badge" title="' + esc(_t('לחלק מהפילמנט אין מחיר')) + '">' + _t('חלקי') + '</span>' : ''}</dd>`;
 }
 
