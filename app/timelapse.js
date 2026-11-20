@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const ftp = require('basic-ftp');
-const { access, blanked } = require('./printerfiles');
+const { access, guardedFile } = require('./printerfiles');
 
 const DIRS = ['/timelapse', '/sdcard/timelapse'];
 const VIDEO = /\.(mp4|avi)$/i;
@@ -43,11 +43,11 @@ function matchPrint(prints, serial, v) {
  */
 async function syncPrinter({ printer, library, out, del, log }) {
   const client = new ftp.Client(30000);
-  let got = 0;
+  let got = 0, blocked = false;
+  const seen = new Set(out.data.timelapseSeen || []);
   try {
     await client.access(access(printer)); // same FTPS options as the print files (incl. the data-channel fix)
     const vids = await listVideos(client);
-    const seen = new Set(out.data.timelapseSeen || []);
     const dir = path.join(library, '.shelf', 'timelapse');
     for (const v of vids) {
       const id = `${printer.serial}/${v.name}`;
@@ -58,10 +58,18 @@ async function syncPrinter({ printer, library, out, del, log }) {
       const name = `${printer.serial}_${v.name}`;
       const dst = path.join(dir, name);
       const part = dst + '.part';
-      await client.downloadTo(part, `${v.dir}/${v.name}`);
+      // the printer may serve a blanked copy (stops at the first bytes): never link it, never delete the original for it
+      try { await client.downloadTo(guardedFile(part), `${v.dir}/${v.name}`); } catch (err) {
+        try { fs.unlinkSync(part); } catch { }
+        if (err.blanked) {
+          (out.data.storageBlocked = out.data.storageBlocked || {})[printer.serial] = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+          log(`timelapse: ${printer.name} serves blanked files (its firmware blocks LAN downloads), skipped`);
+          blocked = true;
+          break;
+        }
+        throw err;
+      }
       if (v.size && fs.statSync(part).size !== v.size) { fs.unlinkSync(part); throw new Error(`${v.name}: incomplete download`); }
-      // the printer may serve a blanked copy: never link it, and never delete the original for it
-      if (blanked(part)) { fs.unlinkSync(part); throw new Error('the printer serves blanked files (download blocked by its firmware)'); }
       fs.renameSync(part, dst);
       p.timelapse = 'timelapse/' + name;
       seen.add(id);
@@ -71,11 +79,14 @@ async function syncPrinter({ printer, library, out, del, log }) {
         try { await client.remove(`${v.dir}/${v.name}`); log(`timelapse: deleted ${v.name} from the printer`); } catch (e) { log(`timelapse: delete failed (${e.message})`); }
       }
     }
-    out.data.timelapseSeen = [...seen].slice(-2000);
-    if (got) out.write();
   } catch (e) {
     log(`timelapse: ${printer.name} skipped (${e.message})`);
-  } finally { client.close(); }
+  } finally {
+    // what was linked (and maybe deleted on the printer) is saved even when a later video failed
+    out.data.timelapseSeen = [...seen].slice(-2000);
+    if (got || blocked) out.write();
+    client.close();
+  }
   return got;
 }
 

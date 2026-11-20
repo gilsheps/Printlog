@@ -228,7 +228,7 @@ class Output {
     this.file = path.join(library, '.shelf', OUT_NAME);
     this.onWrite = onWrite;
     this.data = { schema: 1, helper: {}, printers: {}, prints: [] };
-    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; if (d.idsVer) this.data.idsVer = d.idsVer; if (Array.isArray(d.timelapseSeen)) this.data.timelapseSeen = d.timelapseSeen; } catch { }
+    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.prints)) this.data.prints = d.prints; if (d.idsVer) this.data.idsVer = d.idsVer; if (Array.isArray(d.timelapseSeen)) this.data.timelapseSeen = d.timelapseSeen; if (d.storageBlocked && typeof d.storageBlocked === 'object') this.data.storageBlocked = d.storageBlocked; } catch { }
     this.data.helper = { version: 'app', app: true, mode, host: os.hostname(), started: nowIso() };
     this.lastWrite = 0; this.pending = false;
     // older versions missed some matches and left a live duplicate next to the cloud record
@@ -664,7 +664,11 @@ class Engine {
       if (moved) { try { if (!fs.readdirSync(old).length) fs.rmdirSync(old); } catch { } out.write(); this.log(`model: moved ${moved} downloaded model(s) to .shelf/models`); }
     } catch (e) { this.log('model: move failed ' + e.message); }
     // a print given up on before its printer was reachable on the LAN gets another chance (its storage)
-    for (const p of out.data.prints) if (p.modelGone && !p.storageMiss && Engine.lanPrinter(cfg, p)) delete p.modelGone;
+    // (and a cloud print that was only given up on while signed out)
+    for (const p of out.data.prints) {
+      if (!p.modelGone) continue;
+      if ((!p.storageMiss && this.storageOpen(cfg, p)) || (cfg.cloud?.token && /^cloud-/.test(p.key) && (p.modelTries || 0) < 2)) delete p.modelGone;
+    }
     this.logFile = path.join(cfg.library, '.shelf', 'sync.log');
     try { fs.mkdirSync(path.dirname(this.logFile), { recursive: true }); } catch { }
     this.log(`engine start: mode=${cfg.mode} printers=${(cfg.printers || []).map((p) => `${p.name}[${p.ip ? 'ip' : '-'}${p.access_code ? '+code' : ''}]`).join(' ')} cloud=${cfg.cloud?.token ? 'yes' : 'no'}`);
@@ -725,7 +729,8 @@ class Engine {
       for (const p of cfg.printers || []) {
         const w = this.watchers[p.serial];
         if (!p.ip || !p.access_code || !w || !w.lanUp || !this.out) continue;
-        n += await syncTimelapse({ printer: p, library: cfg.library, out: this.out, del: !!o.timelapseDelete, log: this.log });
+        if (this.storageBlocked(p.serial)) continue;
+        n += await this.withPrinterFtp(p.serial, () => syncTimelapse({ printer: p, library: cfg.library, out: this.out, del: !!o.timelapseDelete, log: this.log }));
       }
     } finally { this.tlBusy = false; }
     return n;
@@ -840,6 +845,24 @@ class Engine {
   static lanPrinter(cfg, e) {
     return (cfg.printers || []).find((p) => p.serial === e.serial && p.ip && p.access_code) || null;
   }
+  // a printer whose firmware serves blanked files: checked again after a week (a firmware update may change it)
+  storageBlocked(serial) {
+    const t = Date.parse(((this.out && this.out.data.storageBlocked) || {})[serial] || '');
+    return !!t && Date.now() - t < 7 * 864e5;
+  }
+  // its storage can still be searched for this print
+  storageOpen(cfg, e) {
+    const p = Engine.lanPrinter(cfg, e);
+    return p && !this.storageBlocked(p.serial) ? p : null;
+  }
+  // one FTPS session per printer at a time (the printer allows only a few): model downloads and timelapses take turns
+  withPrinterFtp(serial, fn) {
+    this.ftpLocks = this.ftpLocks || new Map();
+    const prev = this.ftpLocks.get(serial) || Promise.resolve();
+    const run = prev.catch(() => {}).then(fn);
+    this.ftpLocks.set(serial, run.catch(() => {}));
+    return run;
+  }
   // Bambu Cloud first (two tries over time); when it has no file, the printer's own storage (once)
   async doFetchModel(key, onProgress = () => {}) {
     const cfg = this.getConfig();
@@ -860,21 +883,22 @@ class Engine {
         cloudErr = err;
       }
     }
-    const printer = !e.storageMiss && Engine.lanPrinter(cfg, e);
-    let blocked = false;
+    const lan = Engine.lanPrinter(cfg, e);
+    const printer = !e.storageMiss && this.storageOpen(cfg, e);
     if (printer) {
-      const r = await this.fetchPrinterModel(e, cfg, printer, onProgress);
+      const r = await this.withPrinterFtp(printer.serial, () => this.fetchPrinterModel(e, cfg, printer, onProgress));
       if (r && r.path) return r;
-      blocked = !!(r && r.blocked);
     }
-    // nothing left to try (until the printer gets an IP): the card stops waiting for a file
-    const cloudLeft = fromCloud && signedIn && (e.modelTries || 0) < 2;
-    const storageLeft = !e.storageMiss && Engine.lanPrinter(cfg, e);
+    // nothing left to try: the card stops waiting for a file. Not while signed out of Bambu (the
+    // cloud wasn't asked yet), and not while the printer is just unreachable (it's asked again later).
+    const cloudLeft = fromCloud && (e.modelTries || 0) < 2;
+    const storageLeft = !e.storageMiss && this.storageOpen(cfg, e);
     if (!cloudLeft && !storageLeft) { e.modelGone = true; this.out.write(true); }
-    if (blocked) throw new CloudError(_t('הקובץ נמצא במדפסת, אבל המדפסת לא מאפשרת להוריד אותו'));
-    if (cloudErr && !e.storageMiss) throw cloudErr;
+    if (lan && this.storageBlocked(lan.serial) && !e.storageMiss) throw new CloudError(_t('הקובץ נמצא במדפסת, אבל המדפסת לא מאפשרת להוריד אותו'));
     if (fromCloud && !signedIn && !printer) throw new CloudError(_t('צריך להתחבר ל-Bambu בהגדרות'));
-    throw new CloudError(e.storageMiss ? _t('הקובץ לא נמצא ב-Bambu ולא בזיכרון המדפסת') : _t('אין קובץ ב-Bambu, והמדפסת לא זמינה ברשת המקומית'));
+    if (cloudErr && !e.storageMiss) throw cloudErr;
+    if (e.storageMiss) throw new CloudError(fromCloud ? _t('הקובץ לא נמצא ב-Bambu ולא בזיכרון המדפסת') : _t('הקובץ לא נמצא בזיכרון המדפסת'));
+    throw new CloudError(lan ? _t('המדפסת לא זמינה ברשת המקומית כרגע') : fromCloud ? _t('אין קובץ ב-Bambu') : _t('אין גישה לזיכרון של המדפסת הזו'));
   }
   async fetchCloudModel(e, cfg, onProgress) {
     const cloud = new BambuCloud(cfg.cloud.region, cfg.cloud.token);
@@ -900,28 +924,35 @@ class Engine {
   // the .gcode.3mf the printer was sent for this print, from its SD card / USB storage (FTPS)
   // → { path, size } | null (not there: remembered, so it isn't looked for again)
   async fetchPrinterModel(e, cfg, printer, onProgress) {
+    // printer off / away from home: don't wait for it again for every print in the queue
+    const down = this.storageDown && this.storageDown.get(printer.serial);
+    if (down && Date.now() - down < 10 * 60000) return null;
     let client;
     try { client = await printerFiles.connect(printer); } catch (err) {
+      (this.storageDown = this.storageDown || new Map()).set(printer.serial, Date.now());
       this.log(`model: ${printer.name || printer.serial} storage not reachable (${err.message})`);
-      return null; // printer off / away from home: try again another time
+      return null; // try again another time
     }
+    if (this.storageDown) this.storageDown.delete(printer.serial);
     try {
+      // a listing from before the print started can't know its file: list again
+      const since = Date.parse(e.start || '') || 0;
       let cached = this.storage.get(printer.serial);
-      if (!cached || Date.now() - cached.t > 5 * 60000) { cached = { t: Date.now(), files: await printerFiles.listFiles(client), blocked: cached && cached.blocked }; this.storage.set(printer.serial, cached); }
+      if (!cached || Date.now() - cached.t > 5 * 60000 || cached.t < since) { cached = { t: Date.now(), files: await printerFiles.listFiles(client) }; this.storage.set(printer.serial, cached); }
       const f = printerFiles.matchFile(cached.files, e);
       if (!f) { e.storageMiss = nowIso(); this.out.write(true); this.log(`model: ${e.key} not on ${printer.name || printer.serial} either`); return null; }
-      // its firmware serves blanked copies: one check per run of the app, not one download per print
-      if (cached.blocked) return { blocked: true };
       const { dir, part } = this.modelPart(cfg);
       client.trackProgress((info) => onProgress(info.bytes, f.size));
-      try { await client.downloadTo(part, printerFiles.remotePath(f)); } catch (err) { try { fs.unlinkSync(part); } catch { } throw err; } finally { client.trackProgress(); }
-      if (f.size && fs.statSync(part).size !== f.size) { try { fs.unlinkSync(part); } catch { } throw new CloudError(_t('ההורדה מהמדפסת לא הושלמה')); }
-      if (printerFiles.blanked(part)) {
+      try { await client.downloadTo(printerFiles.guardedFile(part), printerFiles.remotePath(f)); } catch (err) {
         try { fs.unlinkSync(part); } catch { }
-        cached.blocked = true;
-        this.log(`model: ${printer.name || printer.serial} lists its files but serves them blanked (firmware blocks LAN downloads)`);
+        if (!err.blanked) throw err;
+        // its firmware lists the files but serves them blanked: remembered, so it isn't downloaded again for every print
+        (this.out.data.storageBlocked = this.out.data.storageBlocked || {})[printer.serial] = nowIso();
+        this.out.write(true);
+        this.log(`model: ${printer.name || printer.serial} lists its files but serves them blanked (its firmware blocks LAN downloads)`);
         return { blocked: true };
-      }
+      } finally { client.trackProgress(); }
+      if (f.size && fs.statSync(part).size !== f.size) { try { fs.unlinkSync(part); } catch { } throw new CloudError(_t('ההורדה מהמדפסת לא הושלמה')); }
       return this.keepModel(e, dir, part, f.name, '.gcode.3mf', `printer ${f.dir === '/' ? '' : f.dir}/${f.name}`);
     } catch (err) {
       this.log(`model: ${e.key} from the printer failed (${err.message})`);
@@ -965,7 +996,7 @@ class Engine {
       while (this.queue.length) {
         const key = this.queue.shift();
         const e = this.out && this.out.data.prints.find((p) => p.key === key);
-        if (!e || e.modelGone) { this.onModel({ key, state: 'error', error: e ? e.modelError : '' }); continue; }
+        if (!e || e.modelGone) { this.onModel({ key, state: 'error', error: e ? e.modelError : '', gone: true }); continue; }
         this.onModel({ key, state: 'dl', p: 0 });
         try {
           const r = await this.fetchModel(key, (got, total) => this.onModel({ key, state: 'dl', p: total ? got / total : null, got, total }));
@@ -986,7 +1017,7 @@ class Engine {
           e.modelError = err.message;
           this.out.write(true);
           this.log(`model: ${key} failed (${err.message})`);
-          this.onModel({ key, state: 'error', error: err.message });
+          this.onModel({ key, state: 'error', error: err.message, gone: !!e.modelGone });
         }
         if (this.getConfig().options?.autoModels === false) this.queue.length = 0;
       }

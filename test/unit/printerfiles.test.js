@@ -53,3 +53,20 @@ console.log('printer files ok');
   fs.rmSync(dir, { recursive: true });
 }
 console.log('printer files blanked ok');
+
+// --- guarded download: a blanked copy stops at the first chunk, a real file is written whole ---
+(async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const { Readable, pipeline } = require('stream');
+  const { guardedFile } = require('../../app/printerfiles.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-'));
+  const run = (chunks, file) => new Promise((res) => pipeline(Readable.from(chunks), guardedFile(file), (err) => res(err)));
+  const errB = await run([Buffer.alloc(1000, 0xff), Buffer.alloc(1000, 0xff)], path.join(dir, 'b'));
+  assert.ok(errB && errB.blanked, 'blanked copy → err.blanked');
+  const real = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(5000, 7)]);
+  const errZ = await run([real.subarray(0, 100), real.subarray(100)], path.join(dir, 'z'));
+  assert.strictEqual(errZ, undefined, 'real file ok');
+  assert.ok(fs.readFileSync(path.join(dir, 'z')).equals(real), 'written whole');
+  fs.rmSync(dir, { recursive: true });
+  console.log('printer files guarded download ok');
+})().catch((e) => { console.error(e); process.exit(1); });

@@ -212,7 +212,7 @@
  "כדי להעלות לענן, התחבר ל-Google Drive בהגדרות": "To upload to the cloud, connect Google Drive in Settings",
  "מוריד {}%": "Downloading {}%",
  "מוריד…": "Downloading…",
- "אין קובץ ב-Bambu": "No file on Bambu",
+ "אין קובץ ב-Bambu": "Bambu has no file",
  "לחץ להורדה": "Click to download",
  "ממתין להורדה": "Waiting to download",
  "<span class=\"badge\" title=\"אין קובץ מתאים בתיקייה\">אין קובץ</span>": "<span class=\"badge\" title=\"No matching file in the folder\">No file</span>",
@@ -650,5 +650,9 @@
  "ההורדה מהמדפסת לא הושלמה": "The download from the printer didn't finish",
  "הקובץ נמצא במדפסת, אבל המדפסת לא מאפשרת להוריד אותו": "The file is on the printer, but the printer doesn't allow downloading it",
  "ההדפסה האחרונה לא הושלמה": "last print didn't finish",
- "פנויה · ההדפסה האחרונה לא הושלמה": "free · last print didn't finish"
+ "פנויה · ההדפסה האחרונה לא הושלמה": "free · last print didn't finish",
+ "הקובץ לא זמין כרגע": "File not available right now",
+ "הקובץ לא נמצא בזיכרון המדפסת": "The file wasn't found on the printer's storage",
+ "המדפסת לא זמינה ברשת המקומית כרגע": "The printer isn't reachable on the local network right now",
+ "אין גישה לזיכרון של המדפסת הזו": "This printer's storage can't be reached"
 }

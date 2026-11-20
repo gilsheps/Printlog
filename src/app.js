@@ -1346,11 +1346,11 @@ function dlState(it, k) {
   const s = S.dl.get(k);
   if (s) return s;
   const e = it.runs.map((r) => r.entry).find((x) => x && x.key === k);
-  if (e && e.modelGone) return { state: 'error', error: e.modelError };
+  if (e && e.modelGone) return { state: 'error', error: e.modelError, gone: true };
   return { state: S.autoModels === false ? 'off' : 'queued' };
 }
 const dlClass = (s) => ({ queued: 'pending', off: 'pending', dl: 'dl', error: 'nofile', done: 'dl' }[s.state] || '');
-const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? _t`מוריד ${Math.round((s.p || 0) * 100)}%` : _t('מוריד…')) : s.state === 'error' ? _t('לא נמצא קובץ') : s.state === 'off' ? _t('לחץ להורדה') : _t('ממתין להורדה'));
+const dlLabel = (s) => (s.state === 'dl' || s.state === 'done' ? (s.p != null ? _t`מוריד ${Math.round((s.p || 0) * 100)}%` : _t('מוריד…')) : s.state === 'error' ? (s.gone ? _t('לא נמצא קובץ') : _t('הקובץ לא זמין כרגע')) : s.state === 'off' ? _t('לחץ להורדה') : _t('ממתין להורדה'));
 function applyDl(el, s) {
   el.classList.remove('pending', 'dl', 'nofile');
   const c = dlClass(s); if (c) el.classList.add(c);
@@ -1369,14 +1369,15 @@ async function prefetchModels() {
     const k = dlKey(it);
     if (!k) continue;
     const s = dlState(it, k);
-    if (s.state === 'error' || s.state === 'done') continue;
+    // a file that may still come (printer away, cloud hiccup) is asked for again, but not more than every 10 minutes
+    if (s.state === 'done' || (s.state === 'error' && (s.gone || Date.now() - (s.at || 0) < 10 * 60000))) continue;
     keys.push(k);
   }
   if (keys.length) await native.sync.prefetch(keys);
 }
 function onModelEvent(ev) {
   const prev = S.dl.get(ev.key);
-  S.dl.set(ev.key, { ...(prev || {}), ...ev });
+  S.dl.set(ev.key, { ...(prev || {}), gone: false, ...ev, ...(ev.state === 'error' ? { at: Date.now() } : {}) });
   for (const el of document.querySelectorAll(`.card[data-dlkey="${CSS.escape(ev.key)}"]`)) applyDl(el, S.dl.get(ev.key));
   if (ev.state === 'done') { S.dlDone.add(ev.key); clearTimeout(S.dlT); S.dlT = setTimeout(attachDownloads, 1500); }
 }
